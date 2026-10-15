@@ -1,0 +1,24 @@
+# Build artifacts
+bin/
+*.o
+
+# Data (large; regenerate with scripts)
+data/*.csv
+
+# Results (regenerate with scripts)
+results/
+*.labels
+
+# Report is a separate Canvas deliverable, not part of the source-code repo.
+report/
+
+
+# Python venv (local plotting only)
+.venv/
+__pycache__/
+
+# Slurm logs
+slurm/logs/
+
+# Editor
+.vscode/
