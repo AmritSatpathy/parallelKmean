@@ -1,0 +1,49 @@
+#!/bin/bash
+# MPI + CUDA multi-GPU run for K-means on VANDA (CPU+GPU cluster, PBS).
+#
+# One MPI rank is bound to one GPU (rank % deviceCount in the code). Request as
+# many GPUs as ranks. Submit once per GPU count, e.g.:
+#
+#   qsub -l select=1:ncpus=1:ngpus=1:mpiprocs=1 -v NP=1 pbs/vanda_cuda.pbs
+#   qsub -l select=1:ncpus=2:ngpus=2:mpiprocs=2 -v NP=2 pbs/vanda_cuda.pbs
+#   qsub -l select=2:ncpus=2:ngpus=2:mpiprocs=2 -v NP=4 pbs/vanda_cuda.pbs   # 4 GPUs / 2 nodes
+#
+# IMPORTANT: Vanda login nodes are a VM — build on a compute node, not the login
+# node. This job script compiles inside the job (which runs on a compute node),
+# so `make` here is safe. For interactive builds use:
+#   qsub -I -l select=1:ncpus=1:ngpus=1 -l walltime=00:10:00
+#
+# EDIT the module names and CUDA_ARCH to match Vanda's GPUs.
+#PBS -N kmeans_cuda
+#PBS -l select=1:ncpus=1:ngpus=1:mpiprocs=1   # overridden by -l on the qsub line
+#PBS -l walltime=00:30:00
+#PBS -j oe
+#PBS -o pbs/logs/
+
+set -eo pipefail          # note: NOT -u — /app1/ebenv references unset vars
+cd "$PBS_O_WORKDIR"
+mkdir -p pbs/logs results
+
+# --- environment + modules (EDIT for Vanda) ---
+# ebenv / module system reference vars that may be unset in a clean batch shell.
+export LD_LIBRARY_PATH="${LD_LIBRARY_PATH:-}"
+source /app1/ebenv 2>/dev/null || true
+# module purge
+# module load <gcc-openmpi> <cuda>     # use the real names from `module avail` on Vanda
+
+# Set to match Vanda's GPU: V100=sm_70, A100=sm_80, H100=sm_90, etc.
+ARCH="${CUDA_ARCH:-sm_80}"
+make cuda gen CUDA_ARCH="$ARCH"
+
+CSV="${CSV:-data/blobs_big.csv}"
+K="${K:-128}"
+SEED="${SEED:-42}"
+MAXIT="${MAXIT:-32}"
+NP="${NP:-1}"                           # number of ranks = number of GPUs
+if [ ! -s "$CSV" ]; then
+    ./bin/gen_blobs --n 3000000 --dims 64 --k "$K" --sep 25 --out "$CSV"
+fi
+
+echo "host=$(hostname)  NP(GPUs)=$NP  arch=$ARCH"
+mpirun -np "$NP" ./bin/kmeans_mpi_cuda "$CSV" "$K" \
+    --label-col 0 --seed "$SEED" --max-iter "$MAXIT" --fixed-iter

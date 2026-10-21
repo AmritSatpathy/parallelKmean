@@ -1,0 +1,58 @@
+#!/bin/bash
+# Full MPI (CPU) strong-scaling SWEEP on ATLAS in a single PBS job.
+#
+# Runs the serial baseline and MPI at every process count listed in PROCS, all
+# on the SAME node (so timings are directly comparable), and writes one combined
+# CSV ready for scripts/plot_scaling.py.
+#
+# Atlas nodes have 80 cores, so the whole 1..64 sweep fits on one node.
+#
+# Submit:
+#   qsub pbs/atlas_sweep.pbs
+# Override the process list or iteration count if desired:
+#   qsub -v PROCS="1 2 4 8 16 32 64 80",MAXIT=32 pbs/atlas_sweep.pbs
+#
+#PBS -N kmeans_sweep
+#PBS -l select=1:ncpus=80:mpiprocs=80
+#PBS -l walltime=02:00:00
+#PBS -j oe
+#PBS -o pbs/logs/
+
+set -eo pipefail          # note: NOT -u — /app1/ebenv references unset vars
+cd "$PBS_O_WORKDIR"
+mkdir -p pbs/logs results
+
+# --- environment + modules (Atlas) ---
+# ebenv and the module system reference variables that may be unset in a clean
+# batch shell (e.g. LD_LIBRARY_PATH), so pre-seed them and keep `-u` disabled.
+export LD_LIBRARY_PATH="${LD_LIBRARY_PATH:-}"
+source /app1/ebenv
+module purge
+module load OpenMPI/4.1.6-GCC-13.2.0   # GCC 13.2 + matching OpenMPI 4.1.6
+
+# Build the CPU targets (idempotent).
+make serial mpi gen
+
+# Benchmark dataset (expected to already be present; generate if missing).
+CSV="${CSV:-data/blobs_big.csv}"
+K="${K:-128}"
+if [ ! -s "$CSV" ]; then
+    ./bin/gen_blobs --n 3000000 --dims 64 --k "$K" --sep 25 --out "$CSV"
+fi
+
+PROCS="${PROCS:-1 2 4 8 16 32 64 80}"
+MAXIT="${MAXIT:-32}"
+SEED="${SEED:-42}"
+REPS="${REPS:-1}"
+
+echo "host=$(hostname)  PROCS=[$PROCS]  MAXIT=$MAXIT"
+
+# The harness runs serial + MPI at each count and writes results/scaling_mpi.csv
+# (columns: impl,nproc,n,dims,k,iters,inertia,time). --fixed-iter via FIXEDITER=1.
+FIXEDITER=1 MAXIT="$MAXIT" SEED="$SEED" REPS="$REPS" \
+    bash scripts/run_scaling.sh "$CSV" "$K" "$PROCS"
+
+# Keep an Atlas-specific copy so it is not overwritten by later runs.
+cp results/scaling_mpi.csv results/scaling_atlas.csv
+echo "wrote results/scaling_atlas.csv"
+cat results/scaling_atlas.csv

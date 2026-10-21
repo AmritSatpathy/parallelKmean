@@ -26,7 +26,7 @@ of the scaling study.
 ```
 src/        C++ sources (serial, MPI, CUDA) + shared header
 scripts/    data generator + download, validation, scaling harness, plotting
-slurm/      Slurm batch scripts for Atlas / Vanda
+pbs/        PBS (qsub) batch scripts for Atlas (CPU) and Vanda (GPU)
 report/     the project report (Markdown; export to PDF for submission)
 Makefile    build targets
 .gitignore  excludes build artifacts, datasets, and results
@@ -71,14 +71,15 @@ plotting, which needs `matplotlib`); shell scripts are POSIX `bash`.
 - `plot_scaling.py` — turns a scaling CSV into `results/scaling_metrics.csv`
   (speedup, efficiency) and, if `matplotlib` is installed, PNG figures.
 
-**Slurm (`slurm/`)**
+**PBS job scripts (`pbs/`)** — Atlas and Vanda use PBS (`qsub`), not Slurm.
 
-- `mpi_scaling.sbatch` — one MPI (CPU) strong-scaling run; submit once per
-  process count.
-- `cuda.sbatch` — an MPI+CUDA run, one rank per GPU.
+- `atlas_mpi.pbs` — one MPI (CPU) strong-scaling run on Atlas (CPU-only
+  cluster); submit once per process count.
+- `vanda_cuda.pbs` — an MPI+CUDA run on Vanda (CPU+GPU cluster), one rank per
+  GPU.
 
 Both auto-generate the benchmark dataset if it is missing. Edit the
-`module load` lines, partition, and `CUDA_ARCH` to match the cluster.
+`module load` lines (and `CUDA_ARCH` for Vanda) to match each cluster.
 
 ## Prerequisites
 
@@ -194,21 +195,55 @@ python3 -m venv .venv && . .venv/bin/activate && pip install matplotlib
 python scripts/plot_scaling.py results/scaling_mpi.csv
 ```
 
-## Running on Atlas / Vanda (Slurm)
+## Running on Atlas / Vanda (PBS / qsub)
 
-Edit the `module load` lines, partition, and `CUDA_ARCH` in the batch scripts,
-then:
+Atlas and Vanda use PBS. Atlas is CPU-only (run the MPI scaling there); Vanda
+has GPUs (run the MPI+CUDA study there). Edit the `module load` lines in the
+`pbs/` scripts, and `CUDA_ARCH` in the Vanda script, to match each cluster.
+
+**Copy the project to the cluster** (binaries and data are rebuilt/regenerated
+there, so they are excluded):
 
 ```bash
-# MPI strong scaling: one job per process count
-for p in 1 2 4 8 16 32 64; do sbatch --ntasks=$p slurm/mpi_scaling.sbatch; done
-
-# MPI + CUDA (e.g. 2 nodes x 2 GPUs = 4 ranks)
-sbatch --nodes=2 --ntasks=4 --gres=gpu:2 slurm/cuda.sbatch
+rsync -av --exclude 'bin/' --exclude 'data/' --exclude 'results/' \
+    --exclude '.venv/' --exclude '*.labels' --exclude 'report/' \
+    --exclude 'pbs/logs/' \
+    ./ satpathy.amrit@atlas8.nus.edu.sg:~/kMeans/
 ```
 
-Logs are written under `slurm/logs/`. Collect the `RESULT` lines from the logs
-into a CSV with the same columns as `run_scaling.sh` produces, then reuse
+**Build.** On Atlas, compile on the login node:
+
+```bash
+source /app1/ebenv
+module load <gcc> <openmpi>          # names from `module avail`
+make mpi gen
+```
+
+On Vanda the login node is a VM, so compile on a compute node:
+
+```bash
+qsub -I -l select=1:ncpus=1:ngpus=1 -l walltime=00:10:00   # interactive node
+module load <gcc> <openmpi> <cuda>
+make cuda gen CUDA_ARCH=sm_XX        # set arch to Vanda's GPU
+exit
+```
+
+**Submit the scaling jobs:**
+
+```bash
+# Atlas — MPI (CPU) strong scaling, one job per process count
+for p in 1 2 4 8 16 32 64; do
+    qsub -l select=1:ncpus=$p:mpiprocs=$p -v NP=$p pbs/atlas_mpi.pbs
+done
+
+# Vanda — MPI + CUDA, one rank per GPU (1, 2, 4 GPUs)
+qsub -l select=1:ncpus=1:ngpus=1:mpiprocs=1 -v NP=1 pbs/vanda_cuda.pbs
+qsub -l select=1:ncpus=2:ngpus=2:mpiprocs=2 -v NP=2 pbs/vanda_cuda.pbs
+qsub -l select=2:ncpus=2:ngpus=2:mpiprocs=2 -v NP=4 pbs/vanda_cuda.pbs
+```
+
+Logs are written under `pbs/logs/`. Collect the `RESULT` lines from the logs
+into a CSV with columns `impl,nproc,n,dims,k,iters,inertia,time`, then reuse
 `plot_scaling.py` to make the figures.
 
 ## End-to-end example (quick validation)
