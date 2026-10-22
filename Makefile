@@ -21,9 +21,16 @@ CXXFLAGS ?= -O3 -std=c++17 -Wall -Wextra -march=native
 CUDA_ARCH ?= sm_75
 NVCCFLAGS ?= -O3 -std=c++17 -arch=$(CUDA_ARCH)
 
-# Pull MPI's compile/link flags so nvcc (not an MPI wrapper) can find mpi.h.
-MPI_INC  := $(shell $(MPICXX) --showme:compile 2>/dev/null)
-MPI_LINK := $(shell $(MPICXX) --showme:link 2>/dev/null)
+# MPI include/library paths for nvcc. We deliberately use OpenMPI's
+# --showme:incdirs / --showme:libdirs (which emit bare paths) rather than
+# --showme:compile / --showme:link, because the latter include host-linker
+# flags like `-Wl,-rpath,...` that nvcc cannot parse. From bare paths we build
+# plain -I / -L / -lmpi flags, which nvcc understands natively and portably
+# (works with both the local and Vanda OpenMPI builds).
+MPI_INCDIRS := $(shell $(MPICXX) --showme:incdirs 2>/dev/null)
+MPI_LIBDIRS := $(shell $(MPICXX) --showme:libdirs 2>/dev/null)
+MPI_INC  := $(foreach d,$(MPI_INCDIRS),-I$(d))
+MPI_LINK_NVCC := $(foreach d,$(MPI_LIBDIRS),-L$(d)) -lmpi
 
 SRC     := src
 SCRIPTS := scripts
@@ -47,7 +54,7 @@ mpi: dirs
 
 cuda: dirs
 	$(NVCC) $(NVCCFLAGS) $(MPI_INC) $(SRC)/kmeans_mpi_cuda.cu \
-		$(MPI_LINK) -o $(BIN)/kmeans_mpi_cuda
+		$(MPI_LINK_NVCC) -o $(BIN)/kmeans_mpi_cuda
 
 clean:
 	rm -rf $(BIN)

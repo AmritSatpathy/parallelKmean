@@ -1,11 +1,34 @@
-# Build artifacts
+# === Build artifacts (regenerate with `make`) ===
 bin/
 *.o
 
-# Data (large; regenerate with scripts)
+# === Data (large; regenerate with scripts/gen_blobs + scripts/fetch_mnist.sh) ===
 data/*.csv
+*.labels
 
-
-# Python venv (local plotting only)
+# === Python venv (local plotting only) ===
 .venv/
 __pycache__/
+
+# === Not part of this submission ===
+# A different course project, dropped in only as a formatting/AI-usage template.
+Project2.docx
+Project2.docx*
+*.Identifier
+
+# === Report-generation tooling (produces the Word file + its figures; the
+# report itself is a separate Canvas deliverable, not source code) ===
+scripts/md_to_docx.py
+scripts/make_docx.sh
+scripts/render_diagrams_mpl.py
+scripts/plot_illustrations.py
+
+# === Generated report artifacts ===
+report/report.docx
+report/_report_docx.md
+
+# === Generated figures (regenerate with scripts/plot_scaling.py) ===
+# The raw benchmark CSVs are kept for reproducibility; the rendered images and
+# hand-authored report diagrams are not source and can be regenerated.
+results/*.png
+results/*.svg

@@ -121,8 +121,10 @@ int main(int argc, char** argv) {
     std::vector<float> local_sums(static_cast<size_t>(k) * dims);
     std::vector<float> global_sums(static_cast<size_t>(k) * dims);
     std::vector<long long> local_cnt(k), global_cnt(k);
-    // Pack inertia + moved into the same reduction to save a collective:
-    // we reduce [sums | counts] and separately reduce two doubles.
+    // Reduction phase per iteration = three MPI_Allreduce calls: the coordinate
+    // sums (float), the per-cluster counts (long long), and a 2-element double
+    // buffer carrying the scalar inertia + moved-point diagnostics. The counts
+    // are kept separate from the sums because their datatypes differ.
 
     double prev_inertia = -1.0;
     int iter = 0;

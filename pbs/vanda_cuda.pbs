@@ -24,15 +24,14 @@ set -eo pipefail          # note: NOT -u — /app1/ebenv references unset vars
 cd "$PBS_O_WORKDIR"
 mkdir -p pbs/logs results
 
-# --- environment + modules (EDIT for Vanda) ---
+# --- environment + modules (Vanda) ---
 # ebenv / module system reference vars that may be unset in a clean batch shell.
 export LD_LIBRARY_PATH="${LD_LIBRARY_PATH:-}"
-source /app1/ebenv 2>/dev/null || true
-# module purge
-# module load <gcc-openmpi> <cuda>     # use the real names from `module avail` on Vanda
+module purge
+module load GCC/13.2.0 OpenMPI/4.1.6-GCC-13.2.0 CUDA/12.4.0
 
-# Set to match Vanda's GPU: V100=sm_70, A100=sm_80, H100=sm_90, etc.
-ARCH="${CUDA_ARCH:-sm_80}"
+# Vanda GPUs are NVIDIA A40 (Ampere, compute capability 8.6) -> sm_86.
+ARCH="${CUDA_ARCH:-sm_86}"
 make cuda gen CUDA_ARCH="$ARCH"
 
 CSV="${CSV:-data/blobs_big.csv}"

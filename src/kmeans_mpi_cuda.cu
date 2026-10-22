@@ -46,20 +46,27 @@ using km::Dataset;
 
 // Assignment kernel. Shared memory holds the centroids when they fit; one
 // thread handles one point. Partial sums and counts are accumulated with
-// atomicAdd into global arrays. Per-point squared distance to the chosen
-// centroid is summed into a global inertia accumulator (also via atomicAdd on a
-// double) -- fine because it is one add per point.
+// atomicAdd into global arrays. Each thread also adds its point's squared
+// distance to the chosen centroid directly into a global inertia accumulator
+// via atomicAdd on a double (one atomic per point; not block-reduced). This is
+// simple and the inertia atomics are a small share of the kernel's O(n*k*dims)
+// distance work; a per-block reduction would reduce contention if needed.
 __global__ void assign_kernel(const float* __restrict__ points, int local_n,
                               int dims, const float* __restrict__ cents, int k,
                               float* sums, int* counts, int* assign,
-                              double* inertia) {
-    extern __shared__ float s_cents[];  // k*dims floats when it fits
+                              double* inertia, bool use_shared) {
+    extern __shared__ float s_cents[];  // k*dims floats when launched with shmem
 
-    // Cooperatively load centroids into shared memory.
-    const int tsz = blockDim.x;
-    for (int idx = threadIdx.x; idx < k * dims; idx += tsz)
-        s_cents[idx] = cents[idx];
-    __syncthreads();
+    // Cooperatively load centroids into shared memory (only when the launch
+    // allocated it; otherwise read centroids straight from global memory so we
+    // never touch unallocated shared memory).
+    if (use_shared) {
+        const int tsz = blockDim.x;
+        for (int idx = threadIdx.x; idx < k * dims; idx += tsz)
+            s_cents[idx] = cents[idx];
+        __syncthreads();
+    }
+    const float* cbase = use_shared ? s_cents : cents;
 
     const int i = blockIdx.x * blockDim.x + threadIdx.x;
     if (i >= local_n) return;
@@ -68,7 +75,7 @@ __global__ void assign_kernel(const float* __restrict__ points, int local_n,
     float best = 3.4e38f;
     int bestj = 0;
     for (int j = 0; j < k; ++j) {
-        const float* c = s_cents + j * dims;
+        const float* c = cbase + j * dims;
         float d = 0.0f;
         for (int dd = 0; dd < dims; ++dd) {
             float diff = p[dd] - c[dd];
@@ -222,7 +229,7 @@ int main(int argc, char** argv) {
         if (local_n > 0) {
             assign_kernel<<<blocks, TPB, use_shared ? shmem : 0>>>(
                 d_points, local_n, dims, d_cents, k,
-                d_sums, d_counts, d_assign, d_inertia);
+                d_sums, d_counts, d_assign, d_inertia, use_shared);
             CUDA_CHECK(cudaGetLastError());
         }
         CUDA_CHECK(cudaDeviceSynchronize());

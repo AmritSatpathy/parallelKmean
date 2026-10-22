@@ -16,10 +16,11 @@ baseline.
 
 **Why this is a non-trivial parallelization.** The assignment step (each point to
 its nearest centroid) is embarrassingly parallel. The centroid-update step is a
-**global reduction** over all points — in MPI it is one `MPI_Allreduce` per
-iteration; on the GPU it is `atomicAdd` accumulation plus the same cross-rank
-`MPI_Allreduce`. That reduction and its synchronization is the interesting part
-of the scaling study.
+**global reduction** over all points — in MPI it is a reduction phase of three
+`MPI_Allreduce` calls per iteration (coordinate sums, counts, and the scalar
+inertia/moved diagnostics); on the GPU it is `atomicAdd` accumulation plus the
+same cross-rank reduction. That reduction and its synchronization is the
+interesting part of the scaling study.
 
 ## Repository layout
 
@@ -47,12 +48,13 @@ from the commands below).
 - `kmeans_serial.cpp` — single-threaded Lloyd's algorithm. The correctness
   reference and the denominator for speedup.
 - `kmeans_mpi.cpp` — distributes points across ranks with `MPI_Scatterv`; each
-  rank assigns its local points and forms partial sums; `MPI_Allreduce` combines
-  them so every rank recomputes identical centroids.
+  rank assigns its local points and forms partial sums; a reduction phase of
+  three `MPI_Allreduce` calls (sums, counts, scalar diagnostics) combines them so
+  every rank recomputes identical centroids.
 - `kmeans_mpi_cuda.cu` — same MPI decomposition between ranks, but each rank runs
   the assignment step on a GPU (one CUDA thread per point, centroids staged in
   shared memory, partial sums via `atomicAdd`), then the same cross-rank
-  `MPI_Allreduce`.
+  reduction phase.
 
 **Scripts (`scripts/`)** — Python scripts use only the standard library (except
 plotting, which needs `matplotlib`); shell scripts are POSIX `bash`.
@@ -73,8 +75,9 @@ plotting, which needs `matplotlib`); shell scripts are POSIX `bash`.
 
 **PBS job scripts (`pbs/`)** — Atlas and Vanda use PBS (`qsub`), not Slurm.
 
-- `atlas_mpi.pbs` — one MPI (CPU) strong-scaling run on Atlas (CPU-only
-  cluster); submit once per process count.
+- `atlas_sweep.pbs` — runs the whole MPI (CPU) strong-scaling sweep (serial
+  baseline + every process count in `PROCS`) in a single Atlas job and writes
+  `results/scaling_atlas.csv`.
 - `vanda_cuda.pbs` — an MPI+CUDA run on Vanda (CPU+GPU cluster), one rank per
   GPU.
 
@@ -231,10 +234,10 @@ exit
 **Submit the scaling jobs:**
 
 ```bash
-# Atlas — MPI (CPU) strong scaling, one job per process count
-for p in 1 2 4 8 16 32 64; do
-    qsub -l select=1:ncpus=$p:mpiprocs=$p -v NP=$p pbs/atlas_mpi.pbs
-done
+# Atlas — MPI (CPU) strong scaling, whole sweep in one job
+qsub pbs/atlas_sweep.pbs
+# override the process list / node layout if desired, e.g. a two-node allocation:
+qsub -l select=2:ncpus=16:mpiprocs=16 -v PROCS="1 2 4 8 16 32" pbs/atlas_sweep.pbs
 
 # Vanda — MPI + CUDA, one rank per GPU (1, 2, 4 GPUs)
 qsub -l select=1:ncpus=1:ngpus=1:mpiprocs=1 -v NP=1 pbs/vanda_cuda.pbs

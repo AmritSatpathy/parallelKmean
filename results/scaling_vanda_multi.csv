@@ -1,0 +1,3 @@
+impl,nproc,n,dims,k,iters,inertia,time
+mpi_cuda,1,3000000,64,128,32,8.624057e+08,8.622686
+mpi_cuda,2,3000000,64,128,32,8.624058e+08,4.309527
