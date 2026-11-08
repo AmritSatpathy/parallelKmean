@@ -1027,3 +1027,115 @@ See `README.md`. In short: `make all`, `bash scripts/fetch_mnist.sh` (or
 `./bin/gen_blobs …` for the synthetic set), then the run / validate / scaling
 commands. Every `RESULT` line and label file referenced above is produced by
 those commands.
+
+## 15. Appended experiments: Ritik Srivastava, November 2026
+
+This addendum preserves every earlier experiment and value in Sections 6–12.
+The earlier local, Atlas, and Vanda measurements belong to the original
+collaborator series; they are not superseded by the new runs below. Historical
+PBS identifiers were not recorded in the earlier supplied CSV files or report,
+so no newer identifier is assigned to them. The designed publication edition is
+`report/Parallel_Kmeans_Project_Report.docx` and its corresponding PDF, built by
+`report/scripts/build_kmeans_report.py`. Its run ledger and charts distinguish
+the original and appended series.
+
+### 15.1 Atlas 9: full 16-rank workload
+
+PBS job **1034257.venus01**, submitted by Ritik Srivastava on 5 November 2026,
+ran on `cnode-33-43-27`. The workload contains 3,000,000 points, 64 features,
+128 clusters, and 100 fixed iterations. The retained log is
+`pbs/logs/1034257.venus01.OU`.
+
+| Implementation | Ranks | Clustering time (s) | Speedup | Efficiency |
+|---|---:|---:|---:|---:|
+| Serial | 1 | 1703.059729 | 1.0000 | 100.00% |
+| MPI | 16 | 108.220590 | 15.7369 | 98.36% |
+
+Both outputs print inertia `1.214576e+09`. The job exited with status 0,
+wall time `00:32:56`, and aggregate CPU time `01:09:50`. These are separate
+from the original 32-iteration timings. The working Atlas 9 session used
+GCC 7.3.0 and OpenMPI 4.1.1; this does not replace the earlier environment
+reported by the collaborator.
+
+### 15.2 Vanda: independent one- and two-A40 measurements
+
+Both appended GPU runs use 3,000,000 points, 64 dimensions, K=128, seed 42,
+32 fixed iterations, GCC 13.2.0, OpenMPI 4.1.6, CUDA 12.4, and `sm_86`.
+
+| PBS job identifier | Node | GPUs/ranks | Clustering time (s) | Inertia |
+|---|---|---:|---:|---:|
+| 1533324.stdct-mgmt-02 | GN-A40-021 | 1 | 10.159337 | 8.624057e+08 |
+| 1533344.stdct-mgmt-02 | GN-A40-035 | 2 | 5.073951 | 8.624057e+08 |
+
+Within this pair, speedup is approximately 2.0023× and efficiency is 100.11%.
+The small excess above 100% is consistent with ordinary run-to-run variation;
+one timing per configuration cannot establish significant superlinear behavior.
+Both jobs have exit status 0 in the recorded terminal history. Supplied log
+copies are `pbs/logs/vanda/vanda_1gpu_full.OU` and
+`pbs/logs/vanda/vanda_2gpu_full.OU`. Full job IDs are mapped from the original
+downloaded log filenames in the session record; the renamed log bodies do not
+contain a JobId field. The earlier Vanda times of 8.622686 and 4.309527 seconds
+remain valid original-series observations and are not overwritten.
+
+The logs contain ignored OpenMPI TM-component warnings about `libpbs.so.0`.
+The single-node results are successful, but do not validate multi-node launcher
+integration. Allreduce in this implementation uses **host buffers**, following
+device-to-host copies; it is not a direct GPU-memory collective.
+
+### 15.3 Other scheduler identifiers retained from the session
+
+| Identifier | Recorded purpose or outcome |
+|---|---|
+| 1027931.venus01 | Failed setup: missing dataset directory; exit 1 |
+| 1027936.venus01 | Failed setup: obsolete ebenv initialization; exit 1 |
+| 1027943.venus01 | Failed setup: module discovery; exit 1 |
+| 1027945.venus01 | Failed setup: module discovery; exit 1 |
+| 1027946.venus01 | Failed build: inherited MVAPICH2 libraries; exit 2 |
+| 1027948.venus01 | Successful Atlas MNIST sweep; exit 0; wall time 00:04:33 |
+| 1027967.venus01 | Queued 96-core request; cancellation instructed; final state not retained |
+| 1533323.stdct-mgmt-02 | Successful Vanda MNIST smoke test, 10 iterations, 0.141688 s |
+
+Only records with completed benchmark outputs are used as timing evidence.
+The MNIST GPU smoke test has inertia `1.785707e+11`; its ten fixed iterations
+are not the same protocol as the earlier convergence-based MNIST validation.
+
+### 15.4 Comparability boundary
+
+The appended Atlas inertia (`1.214576e+09`) differs from that of the Vanda
+synthetic workload (`8.624057e+08`). File names and dimensions alone do not
+establish dataset identity. Without dataset hashes and complete generator
+settings, these are separate workloads and their times must not be pooled into
+a controlled CPU/GPU speedup. The appended GPU pair and the appended Atlas
+serial/MPI pair each permit a within-series comparison. Fixed-iteration logs
+that say “converged in” are interpreted as “completed the requested iterations”.
+
+## 16. Additional AI acknowledgment and NUS policy
+
+The original Kiro acknowledgment in Section 13 remains in force. In addition,
+the authors acknowledge use of **GPT 6.1 Astra, GPT 6.1 Solo, GPT 6 Astra,
+Claude, and ChatGPT/Codex**. Tool labels are recorded as supplied by the team;
+they do not assert independently verified vendor model release identifiers.
+Assistance included code and script drafting or debugging, compiler/MPI/CUDA
+environment troubleshooting, PBS execution and monitoring commands, repository
+review, interpretation, report editing, chart and architecture-diagram code,
+and document layout. The authors retain responsibility for the submitted
+project, its code, experiments, claims, citations, and final text. AI is not an
+independent source of experimental validation.
+
+NUS’s *Policy for the Use of AI in Teaching and Learning*, current version
+15 September 2026, addresses acknowledgment in §§2.5–2.6 and academic integrity
+in §§3–4. The assignment also explicitly requests an AI-usage explanation.
+The acknowledgment follows these principles and the NUS Libraries citation
+guidance. Additional references for this addendum:
+
+7. NUS University Policy Workgroup for AI in Teaching and Learning,
+   *Policy for the Use of AI in Teaching and Learning*, current version
+   15 September 2026. Accessed 8 November 2026.
+   https://ctlt.nus.edu.sg/wp-content/uploads/2026/04/Policy-for-Use-of-AI-in-Teaching-and-Learning.pdf
+8. NUS Libraries, *Citation Styles: Citing AI Tools*, updated 28 August 2026.
+   Accessed 8 November 2026. https://libguides.nus.edu.sg/citation/ai
+9. A. Satpathy and R. Srivastava, *AI assistance acknowledgment for Parallel
+   K-means*, unpublished project disclosure, November 2026, Sections 13 and 16.
+
+The designed publication edition uses its own sequential numbered references
+and retains the earlier measurements as a separate original-series section.

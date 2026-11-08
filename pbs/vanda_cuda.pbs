@@ -15,7 +15,7 @@
 #
 # EDIT the module names and CUDA_ARCH to match Vanda's GPUs.
 #PBS -N kmeans_cuda
-#PBS -l select=1:ncpus=1:ngpus=1:mpiprocs=1   # overridden by -l on the qsub line
+#PBS -l select=1:ncpus=1:ngpus=1:mpiprocs=1
 #PBS -l walltime=00:30:00
 #PBS -j oe
 #PBS -o pbs/logs/

@@ -1,0 +1,113 @@
+{
+  "figure_pack_hash": "38ea26773f587009",
+  "figures": [
+    "01_architecture",
+    "02_india_paths",
+    "03_india_us_paths",
+    "04_peer_correlations",
+    "05_cross_market_correlations",
+    "12_information_ladder",
+    "06a_frontier_timeline",
+    "06b_event_responses",
+    "11_model_family_evidence",
+    "08_combined_benchmarks",
+    "07_transaction_cost_drag",
+    "09_signed_positions",
+    "13_transmission_inference",
+    "15_confirmation_diagnostic",
+    "16_regime_distributions",
+    "10_cost_sensitivity",
+    "14_event_coverage",
+    "17_group_importance_existing"
+  ],
+  "hypothesis_analysis": "hypotheses_20261101T030841Z_d494c2f238ca64a6",
+  "reference_check_date": "2026-11-01",
+  "references": [
+    {
+      "number": 1,
+      "title": "Chinco, A., Clark-Joseph, A. D., and Ye, M. Sparse signals in the cross-section of returns. Journal of Finance 74(1), 449\u2013492, 2019.",
+      "url": "https://doi.org/10.1111/jofi.12733"
+    },
+    {
+      "number": 2,
+      "title": "Kelly, B. T., Malamud, S., and Zhou, K. The virtue of complexity in return prediction. Journal of Finance 79(1), 459\u2013501, 2024.",
+      "url": "https://doi.org/10.1111/jofi.13298"
+    },
+    {
+      "number": 3,
+      "title": "NSE Indices. Nifty IT: index description and constituent resources.",
+      "url": "https://www.niftyindices.com/indices/equity/sectoral-indices/nifty-it"
+    },
+    {
+      "number": 4,
+      "title": "Yahoo Finance historical prices, accessed through yfinance; software documentation.",
+      "url": "https://ranaroussi.github.io/yfinance/"
+    },
+    {
+      "number": 5,
+      "title": "Federal Reserve Bank of St. Louis. FRED/ALFRED API documentation.",
+      "url": "https://fred.stlouisfed.org/docs/api/fred/"
+    },
+    {
+      "number": 6,
+      "title": "Epoch AI. AI benchmarks and capabilities; current-vintage dataset.",
+      "url": "https://epoch.ai/benchmarks"
+    },
+    {
+      "number": 7,
+      "title": "NiftyHistory. Nifty Constituent Ledger; public reconstruction.",
+      "url": "https://niftyhistory.in/"
+    },
+    {
+      "number": 8,
+      "title": "fja05680. Current and historical lists of S&P 500 components; public GitHub repository.",
+      "url": "https://github.com/fja05680/sp500"
+    },
+    {
+      "number": 9,
+      "title": "Infosys. Launched today: Infosys Topaz\u2014an AI-first offering for global enterprises. 23 May 2023.",
+      "url": "https://www.infosys.com/newsroom/press-releases/2023/enterprises-generative-ai.html"
+    },
+    {
+      "number": 10,
+      "title": "Bank of England and Financial Conduct Authority. Artificial intelligence in UK financial services\u20142024. Survey report.",
+      "url": "https://www.bankofengland.co.uk/report/2024/artificial-intelligence-in-uk-financial-services-2024"
+    },
+    {
+      "number": 11,
+      "title": "Doerer, K. Klarna changes its AI tune and again recruits humans for customer service. CX Dive, 9 May 2025.",
+      "url": "https://www.customerexperiencedive.com/news/klarna-reinvests-human-talent-customer-service-AI-chatbot/747586/"
+    },
+    {
+      "number": 12,
+      "title": "Reuters. Anthropic\u2019s AI push raises analyst concerns over Indian IT services revenues. 5 February 2026; syndicated by Investing.com.",
+      "url": "https://www.investing.com/news/stock-market-news/anthropics-ai-push-raises-analyst-concerns-over-it-services-revenues-4486681"
+    },
+    {
+      "number": 13,
+      "title": "TCS. TCS closes FY26 with improving sequential growth momentum and strong deal wins. 9 April 2026.",
+      "url": "https://www.tcs.com/who-we-are/newsroom/press-release/tcs-financial-results-q4-fy-2026"
+    },
+    {
+      "number": 14,
+      "title": "TCS. International growth and strategic wins underpin TCS\u2019 Q2. 8 October 2026.",
+      "url": "https://www.tcs.com/who-we-are/newsroom/press-release/tcs-financial-results-q2-fy-2027"
+    },
+    {
+      "number": 15,
+      "title": "Infosys. Fact sheet: second quarter, fiscal 2027. Employee metrics p. 2; financial metrics p. 1.",
+      "url": "https://www.infosys.com/investors/reports-filings/quarterly-results/2026-2027/q2/documents/fact-sheet.pdf"
+    },
+    {
+      "number": 16,
+      "title": "Wipro. Highlights for the quarter ended 30 June 2026. Data sheet, p. 1.",
+      "url": "https://www.wipro.com/content/dam/nexus/en/investor/quarterly-results/2026-2027/q1fy27/datasheet-q1fy27.pdf"
+    },
+    {
+      "number": 17,
+      "title": "Wipro. Highlights for the quarter ended 30 September 2026. SEC Exhibit 99.5.",
+      "url": "https://www.sec.gov/Archives/edgar/data/1123799/000119312526426841/d188224dex995.htm"
+    }
+  ],
+  "note": "Source facts and experimental findings are separate; no model training performed."
+}

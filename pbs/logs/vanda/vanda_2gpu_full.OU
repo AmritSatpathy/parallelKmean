@@ -1,0 +1,54 @@
+Unloading shared
+  WARNING: Did not unuse /cm/shared/modulefiles
+Loading GCC/13.2.0
+  Loading requirement: GCCcore/13.2.0 zlib/1.2.13-GCCcore-13.2.0
+    binutils/2.40-GCCcore-13.2.0
+
+Loading OpenMPI/4.1.6-GCC-13.2.0
+  Loading requirement: ncurses/6.4-GCCcore-13.2.0 numactl/2.0.16-GCCcore-13.2.0
+    XZ/5.4.4-GCCcore-13.2.0 libxml2/2.11.5-GCCcore-13.2.0
+    libpciaccess/0.17-GCCcore-13.2.0 hwloc/2.9.2-GCCcore-13.2.0 OpenSSL/1.1
+    libevent/2.1.12-GCCcore-13.2.0 UCX/1.15.0-GCCcore-13.2.0
+    libfabric/1.19.0-GCCcore-13.2.0 PMIx/4.2.6-GCCcore-13.2.0
+    UCC/1.2.0-GCCcore-13.2.0
+nvcc -O3 -std=c++17 -arch=sm_86 -I/app1/ebapps/arches/flat-avx2/software/OpenMPI/4.1.6-GCC-13.2.0/include src/kmeans_mpi_cuda.cu \
+	-L/app1/ebapps/arches/flat-avx2/software/OpenMPI/4.1.6-GCC-13.2.0/lib -L/app1/ebapps/arches/flat-avx2/software/hwloc/2.9.2-GCCcore-13.2.0/lib -L/app1/ebapps/arches/flat-avx2/software/libevent/2.1.12-GCCcore-13.2.0/lib -lmpi -o bin/kmeans_mpi_cuda
+g++ -O3 -std=c++17 -Wall -Wextra -march=native scripts/gen_blobs.cpp -o bin/gen_blobs
+host=GN-A40-035  NP(GPUs)=2  arch=sm_86
+[GN-A40-035:1655765] mca_base_component_repository_open: unable to open mca_plm_tm: libpbs.so.0: cannot open shared object file: No such file or directory (ignored)
+[GN-A40-035:1655765] mca_base_component_repository_open: unable to open mca_ras_tm: libpbs.so.0: cannot open shared object file: No such file or directory (ignored)
+[mpi+cuda] n=3000000 dims=64 k=128 nproc=2 gpus/node~2 (load 23.348s)
+  iter   0  inertia 1.986254e+09
+  iter   1  inertia 8.996079e+08
+  iter   2  inertia 8.624141e+08
+  iter   3  inertia 8.624110e+08
+  iter   4  inertia 8.624095e+08
+  iter   5  inertia 8.624088e+08
+  iter   6  inertia 8.624083e+08
+  iter   7  inertia 8.624079e+08
+  iter   8  inertia 8.624076e+08
+  iter   9  inertia 8.624074e+08
+  iter  10  inertia 8.624072e+08
+  iter  11  inertia 8.624071e+08
+  iter  12  inertia 8.624069e+08
+  iter  13  inertia 8.624068e+08
+  iter  14  inertia 8.624067e+08
+  iter  15  inertia 8.624066e+08
+  iter  16  inertia 8.624065e+08
+  iter  17  inertia 8.624064e+08
+  iter  18  inertia 8.624063e+08
+  iter  19  inertia 8.624062e+08
+  iter  20  inertia 8.624061e+08
+  iter  21  inertia 8.624061e+08
+  iter  22  inertia 8.624060e+08
+  iter  23  inertia 8.624060e+08
+  iter  24  inertia 8.624060e+08
+  iter  25  inertia 8.624059e+08
+  iter  26  inertia 8.624059e+08
+  iter  27  inertia 8.624059e+08
+  iter  28  inertia 8.624058e+08
+  iter  29  inertia 8.624058e+08
+  iter  30  inertia 8.624058e+08
+  iter  31  inertia 8.624057e+08
+[mpi+cuda] converged in 32 iters  final_inertia 8.624057e+08  cluster_time 5.074s
+RESULT mpi_cuda n=3000000 dims=64 k=128 nproc=2 iters=32 inertia=8.624057e+08 time=5.073951
