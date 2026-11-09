@@ -1,6 +1,6 @@
 {
   "title": "Parallel K-means report evidence",
-  "report_date": "2026-11-08",
+  "report_date": "2026-11-09",
   "authors": [
     {
       "name": "AMRIT SATPATHY",
@@ -14,11 +14,12 @@
     }
   ],
   "original_inputs_preserved": true,
+  "completed_runs_only": true,
   "experiments": [
     {
       "path": "results/scaling_big.csv",
       "sha256": "983e6b2f2c1b60496b4f6db9f3efce13afcaeb753d9a0d8ca2e7c1cbd4134c7f",
-      "series": "original",
+      "experiment_group": "local_cpu_scaling",
       "rows": [
         {
           "impl": "serial",
@@ -85,7 +86,7 @@
     {
       "path": "results/scaling_atlas.csv",
       "sha256": "8a5693b4b0323bb5ba74276173b1b8a60bd4f6b825bf2d4fc4130d1c4bee992f",
-      "series": "original",
+      "experiment_group": "atlas_single_node_scaling",
       "rows": [
         {
           "impl": "serial",
@@ -152,7 +153,7 @@
     {
       "path": "results/scaling_atlas_2node.csv",
       "sha256": "4a9a4f58a30c536c5a54dcbe79cd14849e0dc01cadeec41b4c902c6782e6fb05",
-      "series": "original",
+      "experiment_group": "atlas_two_node_scaling",
       "rows": [
         {
           "impl": "serial",
@@ -229,7 +230,7 @@
     {
       "path": "results/scaling_vanda_gpu.csv",
       "sha256": "c1f87727400b4ea06bcee8eb25947526f1d5a8a86f9524d1abad68dd367d5a3a",
-      "series": "original",
+      "experiment_group": "vanda_single_gpu_reference",
       "rows": [
         {
           "impl": "mpi_cuda",
@@ -246,7 +247,7 @@
     {
       "path": "results/scaling_vanda_multi.csv",
       "sha256": "b9db0c137a33910baf0c2e3cdd1d683c87693c52b347725355adc3b9e5c73603",
-      "series": "original",
+      "experiment_group": "vanda_gpu_batch_a",
       "rows": [
         {
           "impl": "mpi_cuda",
@@ -273,7 +274,7 @@
     {
       "path": "results/scaling_full_16cores_100iter.csv",
       "sha256": "afc3e461838c8af3ee8e85b0cd39228965a572a4dc414db1af0357333a477c9f",
-      "series": "appended",
+      "experiment_group": "atlas_100_iteration_workload",
       "rows": [
         {
           "impl": "serial",
@@ -300,7 +301,7 @@
     {
       "path": "results/scaling_vanda_multi_latest.csv",
       "sha256": "a772146c476131421bf1a20558f4aa9f5c4389430239ed7bd5754cb2fe243bd2",
-      "series": "appended",
+      "experiment_group": "vanda_gpu_batch_b",
       "rows": [
         {
           "impl": "mpi_cuda",
@@ -323,12 +324,167 @@
           "time": "5.073951"
         }
       ]
+    },
+    {
+      "path": "results/scaling_32cores_100iter_1036751.csv",
+      "sha256": "438e787c4c2bd3c7d0701e79ee30a0f54a3b95b76884604495f8cb27dbc08d0a",
+      "experiment_group": "atlas_100_iteration_32_ranks",
+      "rows": [
+        {
+          "impl": "serial",
+          "nproc": "1",
+          "n": "3000000",
+          "dims": "64",
+          "k": "128",
+          "iters": "100",
+          "inertia": "1.214576e+09",
+          "time": "1694.752549"
+        },
+        {
+          "impl": "mpi",
+          "nproc": "32",
+          "n": "3000000",
+          "dims": "64",
+          "k": "128",
+          "iters": "100",
+          "inertia": "1.214576e+09",
+          "time": "53.819387"
+        }
+      ]
+    },
+    {
+      "path": "results/scaling_48cores_100iter_1036776.csv",
+      "sha256": "f36c01fd2583bb99495d34e8d15272caa656ca9652fd055c4884172d0a852c37",
+      "experiment_group": "atlas_100_iteration_48_ranks",
+      "rows": [
+        {
+          "impl": "serial",
+          "nproc": "1",
+          "n": "3000000",
+          "dims": "64",
+          "k": "128",
+          "iters": "100",
+          "inertia": "1.214576e+09",
+          "time": "1722.174826"
+        },
+        {
+          "impl": "mpi",
+          "nproc": "48",
+          "n": "3000000",
+          "dims": "64",
+          "k": "128",
+          "iters": "100",
+          "inertia": "1.214576e+09",
+          "time": "36.422506"
+        }
+      ]
+    },
+    {
+      "path": "results/scaling_12cores_100iter_1036952.csv",
+      "sha256": "da0b80a826dd31cb5ecf32591d470b9df9f61f3df607aa3bc7697c7019917ab0",
+      "experiment_group": "atlas_100_iteration_12_ranks",
+      "rows": [
+        {
+          "impl": "serial",
+          "nproc": "1",
+          "n": "3000000",
+          "dims": "64",
+          "k": "128",
+          "iters": "100",
+          "inertia": "1.214576e+09",
+          "time": "1704.105486"
+        },
+        {
+          "impl": "mpi",
+          "nproc": "12",
+          "n": "3000000",
+          "dims": "64",
+          "k": "128",
+          "iters": "100",
+          "inertia": "1.214576e+09",
+          "time": "142.843514"
+        }
+      ]
+    },
+    {
+      "path": "results/scaling_16cores_100iter_1037018.csv",
+      "sha256": "762c39e9e7f3b9350eaf1e77cbf61e358393e59277cc3e2c2d89d2459c521f82",
+      "experiment_group": "atlas_100_iteration_16_ranks",
+      "rows": [
+        {
+          "impl": "serial",
+          "nproc": "1",
+          "n": "3000000",
+          "dims": "64",
+          "k": "128",
+          "iters": "100",
+          "inertia": "1.214576e+09",
+          "time": "1716.061499"
+        },
+        {
+          "impl": "mpi",
+          "nproc": "16",
+          "n": "3000000",
+          "dims": "64",
+          "k": "128",
+          "iters": "100",
+          "inertia": "1.214576e+09",
+          "time": "106.207582"
+        }
+      ]
+    },
+    {
+      "path": "results/scaling_24cores_100iter_1037036.csv",
+      "sha256": "936d6970d1b534f4d2b2fd9ae7001ff962d8d3748fe91963cd65e75b14c024fe",
+      "experiment_group": "atlas_100_iteration_24_ranks",
+      "rows": [
+        {
+          "impl": "serial",
+          "nproc": "1",
+          "n": "3000000",
+          "dims": "64",
+          "k": "128",
+          "iters": "100",
+          "inertia": "1.214576e+09",
+          "time": "1728.390679"
+        },
+        {
+          "impl": "mpi",
+          "nproc": "24",
+          "n": "3000000",
+          "dims": "64",
+          "k": "128",
+          "iters": "100",
+          "inertia": "1.214576e+09",
+          "time": "70.887738"
+        }
+      ]
     }
   ],
   "logs": [
     {
+      "path": "pbs/logs/atlas/1036952.venus01.OU",
+      "sha256": "a5f217356729bc5b09687a8038508fa68dec9e4d2cd37af1dc42a46c22e768d4"
+    },
+    {
       "path": "pbs/logs/1034257.venus01.OU",
       "sha256": "1afaed48f46a04a5cc02c83aeb9c408855f37c15dba7638b550ac976f5ba0683"
+    },
+    {
+      "path": "pbs/logs/atlas/1037018.venus01.OU",
+      "sha256": "9c2288d6a9195d49f2396f0b21e0abfed0adcde7d11158f1f4be6d43f1228a31"
+    },
+    {
+      "path": "pbs/logs/atlas/1037036.venus01.OU",
+      "sha256": "20ff419dafcb9758074a271f9fd45808e2de5b6bc36ca59a4e4003e1d3f5d7e3"
+    },
+    {
+      "path": "pbs/logs/atlas/1036751.venus01.OU",
+      "sha256": "28dfff1db3456c9fa73935953256ea07aa126b16af52568aa76bbf27e2d4af75"
+    },
+    {
+      "path": "pbs/logs/atlas/1036776.venus01.OU",
+      "sha256": "9458f8c5551d9354bcd9bcc9fd13e1a787703ee98a18a67818986f9a0c466e48"
     },
     {
       "path": "pbs/logs/vanda/vanda_1gpu_full.OU",
@@ -339,13 +495,121 @@
       "sha256": "8b69fa5cef78abe628270d3c4906ad6137531e640481db76ad43c3ed8e7c7b0b"
     }
   ],
-  "appended_run_ids": [
+  "documented_run_ids": [
     "1027948.venus01",
+    "1036952.venus01",
     "1034257.venus01",
+    "1037018.venus01",
+    "1037036.venus01",
+    "1036751.venus01",
+    "1036776.venus01",
     "1533323.stdct-mgmt-02",
     "1533324.stdct-mgmt-02",
     "1533344.stdct-mgmt-02"
   ],
-  "original_run_ids": "Not recorded in original supplied report/CSV; no replacement IDs assigned",
-  "interpretation": "No cross-series CPU/GPU speedup; dataset hashes are unavailable."
+  "atlas_100_iteration_metrics": [
+    {
+      "job_id": "1036952.venus01",
+      "ranks": 12,
+      "node": "cnode-33-43-26",
+      "csv": "scaling_12cores_100iter_1036952.csv",
+      "log": "pbs/logs/atlas/1036952.venus01.OU",
+      "walltime": "00:35:22",
+      "serial_time": 1704.105486,
+      "mpi_time": 142.843514,
+      "speedup": 11.929876536081295,
+      "efficiency": 0.9941563780067746,
+      "exit_status": 0,
+      "pbs_footer_cpu_time": "00:57:11",
+      "pbs_footer_memory": "3321120kb"
+    },
+    {
+      "job_id": "1034257.venus01",
+      "ranks": 16,
+      "node": "cnode-33-43-27",
+      "csv": "scaling_full_16cores_100iter.csv",
+      "log": "pbs/logs/1034257.venus01.OU",
+      "walltime": "00:32:56",
+      "serial_time": 1703.059729,
+      "mpi_time": 108.22059,
+      "speedup": 15.73692888756197,
+      "efficiency": 0.9835580554726231,
+      "exit_status": 0,
+      "pbs_footer_cpu_time": "01:09:50",
+      "pbs_footer_memory": "1707136kb"
+    },
+    {
+      "job_id": "1037018.venus01",
+      "ranks": 16,
+      "node": "cnode-33-43-53",
+      "csv": "scaling_16cores_100iter_1037018.csv",
+      "log": "pbs/logs/atlas/1037018.venus01.OU",
+      "walltime": "00:32:02",
+      "serial_time": 1716.061499,
+      "mpi_time": 106.207582,
+      "speedup": 16.15761762658338,
+      "efficiency": 1.0098511016614613,
+      "exit_status": 0,
+      "pbs_footer_cpu_time": "00:58:04",
+      "pbs_footer_memory": "3354168kb"
+    },
+    {
+      "job_id": "1037036.venus01",
+      "ranks": 24,
+      "node": "cnode-33-43-53",
+      "csv": "scaling_24cores_100iter_1037036.csv",
+      "log": "pbs/logs/atlas/1037036.venus01.OU",
+      "walltime": "00:31:30",
+      "serial_time": 1728.390679,
+      "mpi_time": 70.887738,
+      "speedup": 24.38208254014256,
+      "efficiency": 1.0159201058392733,
+      "exit_status": 0,
+      "pbs_footer_cpu_time": "00:58:46",
+      "pbs_footer_memory": "1630280kb"
+    },
+    {
+      "job_id": "1036751.venus01",
+      "ranks": 32,
+      "node": "cnode-33-43-21",
+      "csv": "scaling_32cores_100iter_1036751.csv",
+      "log": "pbs/logs/atlas/1036751.venus01.OU",
+      "walltime": "00:36:17",
+      "serial_time": 1694.752549,
+      "mpi_time": 53.819387,
+      "speedup": 31.48962935976956,
+      "efficiency": 0.9840509174927987,
+      "exit_status": 0,
+      "pbs_footer_cpu_time": "00:42:33",
+      "pbs_footer_memory": "3360432kb"
+    },
+    {
+      "job_id": "1036776.venus01",
+      "ranks": 48,
+      "node": "cnode-33-43-47",
+      "csv": "scaling_48cores_100iter_1036776.csv",
+      "log": "pbs/logs/atlas/1036776.venus01.OU",
+      "walltime": "00:31:13",
+      "serial_time": 1722.174826,
+      "mpi_time": 36.422506,
+      "speedup": 47.28326013591706,
+      "efficiency": 0.9850679194982721,
+      "exit_status": 0,
+      "pbs_footer_cpu_time": "00:29:23",
+      "pbs_footer_memory": "2545460kb"
+    }
+  ],
+  "local_runs": [
+    {
+      "execution": "Local run \u2014 CPU",
+      "source": "results/scaling_big.csv"
+    },
+    {
+      "execution": "Local run \u2014 CUDA",
+      "device": "RTX 3050 Ti",
+      "time_s": 35.2,
+      "iterations": 32
+    }
+  ],
+  "interpretation": "One team project; CPU/GPU comparisons require matched workloads; dataset hashes are unavailable."
 }

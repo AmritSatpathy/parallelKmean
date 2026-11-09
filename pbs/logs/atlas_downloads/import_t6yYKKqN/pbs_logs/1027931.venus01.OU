@@ -1,0 +1,18 @@
+g++ -O3 -std=c++17 -Wall -Wextra -march=native src/kmeans_serial.cpp -o bin/kmeans_serial
+mpicxx -O3 -std=c++17 -Wall -Wextra -march=native src/kmeans_mpi.cpp -o bin/kmeans_mpi
+g++ -O3 -std=c++17 -Wall -Wextra -march=native scripts/gen_blobs.cpp -o bin/gen_blobs
+cannot open data/blobs_big.csv
+      ======================================================================================
+     Resource Usage on 2026-10-26 11:31:38.450639:
+     JobId: 1027931.venus01  				 Project: _pbs_project_default 
+     Submission Host: atlas9-c01 
+     Exit Status: 1
+     NCPUs Requested: 16 				 NCPUs Used: 16
+     Memory Requested: 40gb 				 Memory Used: 146324kb 
+     Vmem Used: 722184kb
+     CPU Time Used: 00:00:01 
+     Walltime requested: 01:00:00 			 Walltime Used: 00:00:28
+     Submit Time:  Mon Oct 26 11:30:46 2026 		 Start Time: Mon Oct 26 11:31:10 2026 
+     End Time: Mon Oct 26 11:31:38 2026 
+     Execution Nodes Used: (cnode-33-43-21:ncpus=16)
+     ======================================================================================

@@ -1,0 +1,15 @@
+/app1/ebenv: line 12: /etc/profile.d/rec_modules.sh: No such file or directory
+      ======================================================================================
+     Resource Usage on 2026-10-26 11:35:14.352451:
+     JobId: 1027936.venus01  				 Project: _pbs_project_default 
+     Submission Host: atlas9-c01 
+     Exit Status: 1
+     NCPUs Requested: 16 				 NCPUs Used: 16
+     Memory Requested: 40gb 				 Memory Used: 0b 
+     Vmem Used: 0kb
+     CPU Time Used: 00:00:00 
+     Walltime requested: 01:00:00 			 Walltime Used: 00:00:02
+     Submit Time:  Mon Oct 26 11:35:06 2026 		 Start Time: Mon Oct 26 11:35:08 2026 
+     End Time: Mon Oct 26 11:35:14 2026 
+     Execution Nodes Used: (cnode-33-43-20:ncpus=16)
+     ======================================================================================

@@ -1,0 +1,79 @@
+Job Id: 1037015.venus01
+    Job_Name = km_16r_100
+    Job_Owner = ritiksrivastava@atlas9-c01
+    resources_used.cpupercent = 0
+    resources_used.cput = 00:00:00
+    resources_used.mem = 0b
+    resources_used.ncpus = 16
+    resources_used.vmem = 0kb
+    resources_used.walltime = 00:00:00
+    job_state = F
+    queue = parallel
+    server = venus01
+    Checkpoint = u
+    ctime = Mon Nov  9 10:05:53 2026
+    Error_Path = atlas9-c01:/home/svu/ritiksrivastava/parallelKmean/atlas_runs/
+	run16_ea7BFhDQ/km_16r_100.e1037015
+    exec_host = cnode-33-43-20/1*16
+    exec_vnode = (cnode-33-43-20:ncpus=16:mem=41943040kb)
+    Hold_Types = n
+    Join_Path = oe
+    Keep_Files = n
+    Mail_Points = a
+    mtime = Mon Nov  9 10:06:00 2026
+    Output_Path = atlas9-c01:/home/svu/ritiksrivastava/parallelKmean/atlas_runs
+	/run16_ea7BFhDQ/pbs/logs/
+    Priority = 0
+    qtime = Mon Nov  9 10:05:53 2026
+    Rerunable = True
+    Resource_List.mem = 40gb
+    Resource_List.mpiprocs = 16
+    Resource_List.ncpus = 16
+    Resource_List.ngpus = 0
+    Resource_List.nodect = 1
+    Resource_List.place = free
+    Resource_List.select = 1:ncpus=16:mpiprocs=16:mem=40gb
+    Resource_List.walltime = 02:00:00
+    stime = Mon Nov  9 10:05:55 2026
+    obittime = Mon Nov  9 10:06:00 2026
+    Shell_Path_List = /bin/bash
+    jobdir = /home/svu/ritiksrivastava
+    substate = 93
+    Variable_List = PBS_O_HOME=/home/svu/ritiksrivastava,
+	PBS_O_LANG=en_US.UTF-8,PBS_O_LOGNAME=ritiksrivastava,
+	PBS_O_PATH=/app1/common/Star_CCM/Siemens/16.02.009/STAR-View+16.02.009
+	/bin:/app1/common/Star_CCM/Siemens/16.02.009/STAR-CCM+16.02.009/star/bi
+	n:/app1/ia32-64/java/current/bin:/usr/lib64/mpich-3.2/bin:/usr/share/Mo
+	dules/modulefiles:/etc/modulefiles:/usr/bin:/app1/centos6.3/Intel/xe_20
+	15/composer_xe_2015.3.187/bin/intel64:/app1/centos6.3/Intel/xe_2015/com
+	poser_xe_2015.3.187/debugger/gdb/intel64_mic/bin:/app1/ia32-64/iLog/opl
+	50/bin/x86-64_rhel4.0_3.4:/app1/linux/ILOG/CPLEX_Studio125/cplex/bin/x8
+	6-64_sles10_4.1:/app1/common/Apps/gurobi562/linux64/bin:/usr/local/bin:
+	/usr/bin:/usr/local/sbin:/usr/sbin:/home/svu/ritiksrivastava/.dotnet/to
+	ols:/opt/ibutils/bin:/opt/pbs/bin:/app1/common/bin:/app1/linux/bin:/app
+	1/ia32-64/g03:/app1/ia32-64/bin:/app1/ia32-64/mrbayes-3.1.2:/app1/ia32-
+	64/phase/phase-2.0-src:/app1/ia32-64/gauss/GAUSS_9.0_Linux_amd_64:/usr/
+	lpp/mmfs/bin:/app1/ia32-64/meep/meep-1.0.3-parallel-icc/bin:/app1/mvapi
+	ch2/latest/bin:/home/svu/ritiksrivastava/bin:/app1/ia32-64/bin:/app1/co
+	mmon/matlab/bin:/app1/centos6.3/jdk1.8.0_05/jre/bin:/opt/pbs/bin:/home/
+	svu/ritiksrivastava/.local/bin:/home/svu/ritiksrivastava/bin,
+	PBS_O_MAIL=/var/spool/mail/ritiksrivastava,PBS_O_SHELL=/bin/bash,
+	PBS_O_HOST=atlas9-c01,
+	PBS_O_WORKDIR=/home/svu/ritiksrivastava/parallelKmean/atlas_runs/run16
+	_ea7BFhDQ,PBS_O_SYSTEM=Linux,
+	CSV=/home/svu/ritiksrivastava/parallelKmean/data/blobs_big.csv,K=128,
+	PROCS=16,MAXIT=100,REPS=1,SEED=42,PBS_O_QUEUE=parallel
+    comment = Job run at Mon Nov 09 at 10:05 on (cnode-33-43-20:ncpus=16:mem=41
+	943040kb) and failed
+    etime = Mon Nov  9 10:05:53 2026
+    run_count = 1
+    Stageout_status = 0
+    Exit_status = -1
+    Submit_arguments = -S /bin/bash -q parallel -N km_16r_100 -l select=1:ncpus
+	=16:mpiprocs=16:mem=40gb -l walltime=02:00:00 -v CSV=/home/svu/ritiksri
+	vastava/parallelKmean/data/blobs_big.csv,K=128,PROCS=16,MAXIT=100,REPS=1,
+	SEED=42 pbs/atlas_sweep.pbs
+    history_timestamp = 1794189960
+    project = _pbs_project_default
+    Submit_Host = atlas9-c01
+

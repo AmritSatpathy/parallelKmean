@@ -1,0 +1,14 @@
+      ======================================================================================
+     Resource Usage on 2026-11-09 09:57:07.494507:
+     JobId: 1036953.venus01  				 Project: _pbs_project_default 
+     Submission Host: atlas9-c01 
+     Exit Status: -1
+     NCPUs Requested: 16 				 NCPUs Used: None
+     Memory Requested: 40gb 				 Memory Used: 0b 
+     Vmem Used: None
+     CPU Time Used: 00:00:00 
+     Walltime requested: 02:00:00 			 Walltime Used: 00:00:00
+     Submit Time:  Mon Nov  9 09:21:37 2026 		 Start Time: Mon Nov  9 09:57:04 2026 
+     End Time: Mon Nov  9 09:57:07 2026 
+     Execution Nodes Used: (cnode-33-43-20:ncpus=16:mem=41943040kb)
+     ======================================================================================

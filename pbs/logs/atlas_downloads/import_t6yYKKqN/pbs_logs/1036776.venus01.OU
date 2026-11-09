@@ -1,0 +1,32 @@
+rm -rf bin
+g++ -O3 -std=c++17 -Wall -Wextra -march=native src/kmeans_serial.cpp -o bin/kmeans_serial
+mpicxx -O3 -std=c++17 -Wall -Wextra -march=native src/kmeans_mpi.cpp -o bin/kmeans_mpi
+g++ -O3 -std=c++17 -Wall -Wextra -march=native scripts/gen_blobs.cpp -o bin/gen_blobs
+host=cnode-33-43-47  PROCS=[48]  MAXIT=100
+=== serial baseline ===
+serial,1,3000000,64,128,100,1.214576e+09,1722.174826
+=== mpi np=48 ===
+mpi,48,3000000,64,128,100,1.214576e+09,36.422506
+
+wrote results/scaling_mpi.csv
+impl,nproc,n,dims,k,iters,inertia,time
+serial,1,3000000,64,128,100,1.214576e+09,1722.174826
+mpi,48,3000000,64,128,100,1.214576e+09,36.422506
+wrote results/scaling_atlas.csv
+impl,nproc,n,dims,k,iters,inertia,time
+serial,1,3000000,64,128,100,1.214576e+09,1722.174826
+mpi,48,3000000,64,128,100,1.214576e+09,36.422506
+      ======================================================================================
+     Resource Usage on 2026-11-08 21:58:32.480468:
+     JobId: 1036776.venus01  				 Project: _pbs_project_default 
+     Submission Host: atlas9-c01 
+     Exit Status: 0
+     NCPUs Requested: 48 				 NCPUs Used: 48
+     Memory Requested: 40gb 				 Memory Used: 2545460kb 
+     Vmem Used: 27928316kb
+     CPU Time Used: 00:29:23 
+     Walltime requested: 02:00:00 			 Walltime Used: 00:31:13
+     Submit Time:  Sun Nov  8 21:27:15 2026 		 Start Time: Sun Nov  8 21:27:19 2026 
+     End Time: Sun Nov  8 21:58:32 2026 
+     Execution Nodes Used: (cnode-33-43-47:ncpus=48)
+     ======================================================================================
