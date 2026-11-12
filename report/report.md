@@ -1,1029 +1,348 @@
----
-title: "Parallelising K-means Clustering with MPI and CUDA"
-subtitle: "Scalable Distributed Computing for Data Science DSA5208"
-author: "Amrit Satpathy (A0355181E) · Ritik Srivastava (A0355860X)"
-date: "October 2026"
-geometry: margin=1in
----
-
-<!--
-Export to PDF with either:
-  pandoc report/report.md -o report/report.pdf
-  (needs pandoc + a LaTeX engine, e.g. texlive-xetex)
-or open in a Markdown editor and "export to PDF".
-Figures referenced below live in ../results/. Regenerate the data charts with
-  scripts/plot_scaling.py        (speedup/efficiency/runtime from a scaling CSV)
-  scripts/plot_illustrations.py  (cross-platform, comm-vs-compute, per-iteration)
-The conceptual diagrams are hand-authored SVGs committed alongside:
-  diagram_lloyd.svg, diagram_mpi_dataflow.svg, diagram_cuda_memory.svg
-Section 7 holds the local reference numbers; Section 8
-holds the required Atlas/Vanda runtime figures.
--->
-
-## Required deliverables — where each is covered
-
-| Required item | Section |
-|---------------|---------|
-| Introduction to the algorithm | 1 |
-| Design decisions in the parallelisation | 2, 4.3, 5.3 (and 3–5 overall) |
-| Parallel scaling and efficiency | 7 (local), 8 (cluster) |
-| Analysis and discussion | 9 |
-| Validation that the parallel algorithm is correct | 6 |
-| Runtime figures from Atlas or Vanda | 8 |
-| Conclusions about the real data | 10 (MNIST) |
-| Conclusion | 12 |
-| Explanation of AI usage | 13 |
-| References | 14 |
-
-(Section 9 is analysis and discussion; Section 11 documents limitations of the
-cluster experiments.)
-
-## 1. Introduction: what is K-means?
-
-### 1.1 The problem
-
-K-means is one of the most widely used *unsupervised* clustering algorithms. Given
-a set of `n` data points in `d`-dimensional space and a target number of clusters
-`K`, it partitions the points into `K` groups so that points within a group are
-close together and points in different groups are far apart. "Close" is measured
-by Euclidean distance.
-
-Formally, K-means chooses `K` cluster centres (called **centroids**)
-`μ_1, …, μ_K` and an assignment `a(i)` of each point `x_i` to a centroid, so as to
-minimise the **within-cluster sum of squared distances**, also called the
-*inertia*:
-
-$$ J \;=\; \sum_{i=1}^{n} \bigl\lVert x_i - \mu_{a(i)} \bigr\rVert^2 . $$
-
-Finding the global optimum is NP-hard, so in practice we use an iterative
-heuristic that is guaranteed to decrease `J` every step until it settles into a
-local optimum.
-
-### 1.2 Lloyd's algorithm
-
-The standard heuristic is **Lloyd's algorithm**. After choosing initial
-centroids, it repeats two steps until the assignments stop changing (or the
-inertia stops decreasing by more than a small tolerance):
-
-1. **Assignment step.** Assign every point to the nearest centroid:
-   $$ a(i) = \arg\min_{j}\; \lVert x_i - \mu_j \rVert^2 . $$
-   For each of the `n` points we compute the distance to each of the `K`
-   centroids, and each distance touches `d` coordinates. Cost: **`O(n·K·d)`**.
-
-2. **Update step.** Move each centroid to the mean of the points currently
-   assigned to it:
-   $$ \mu_j = \frac{1}{|C_j|}\sum_{i \in C_j} x_i . $$
-   Each point contributes to exactly one centroid's sum, so this is a
-   **reduction** (a sum) over the data. Cost: **`O(n·d)`**.
-
-Because the assignment step is `K` times more expensive than the update step, it
-is the computational hot spot and the obvious target for parallelisation.
-
-![Lloyd's algorithm: the assignment step (orange) is the `O(n·K·d)` hot spot that dominates each iteration; the update step and seeding are cheap `O(n·d)`/`O(K·d)` work.](../results/diagram_lloyd.svg){ width=42% }
-
-A small practical detail: squared Euclidean distance is used throughout. The
-square root is unnecessary because it does not change which centroid is closest,
-and avoiding it saves work in the inner loop.
-
-### 1.3 Initialisation: k-means++
-
-Lloyd's algorithm only finds a local optimum, and a poor set of starting
-centroids can give a poor result. We seed centroids with **k-means++**, which
-picks the first centroid at random and then picks each subsequent centroid with
-probability proportional to its squared distance from the nearest already-chosen
-centroid. This spreads the initial centroids out and gives better, more
-repeatable results than uniform random seeding. We seed deterministically from a
-fixed `--seed`, so every version of the program (serial, MPI, CUDA) starts from
-*identical* centroids — which is what lets us validate the parallel versions
-against the serial baseline (Section 6).
-
-### 1.4 Why K-means is a good parallelisation target
-
-In the vocabulary of parallel computing, K-means is naturally a **data-parallel**
-problem: the same operation (find the nearest centroid) is applied to many
-independent pieces of data (the points). Data parallelism is attractive because
-it has little synchronisation delay and avoids race conditions, at the cost of
-being less flexible than task parallelism — a trade-off that suits K-means well.
-
-The assignment step is **embarrassingly parallel**: each point's nearest-centroid
-search is independent of every other point. If that were the whole algorithm, a
-parallel version would be trivial and uninteresting.
-
-The update step is what makes it interesting. A centroid's new position depends
-on *all* the points assigned to it. If we spread the points across many
-processes, no single process has all the points for any cluster, so the processes
-must **communicate** to combine their partial results, and they must
-**synchronise** once per iteration before anyone can take the next step. This
-communication-and-synchronisation pattern — a global **reduction** every
-iteration — is exactly the non-trivial behaviour this project sets out to study.
-
-This also sets the ceiling on achievable speedup. By **Amdahl's law**, the
-maximum strong-scaling speedup is `1 / (S + P/n)`, where `S` is the serial
-fraction; here the only inherently non-parallel work per iteration is the small
-`O(K·d)` reduction and the synchronisation around it, so `S` is tiny and the
-algorithm can in principle scale to large process counts — which the measured
-results in Sections 7–8 confirm.
-
-## 2. How we plan to parallelise it
-
-Before writing any parallel code, we settled on the strategy below. The guiding
-idea is **data parallelism over points**: split the `n` points across workers,
-let each worker do the independent per-point work locally, and combine results
-only where the algorithm genuinely requires it (the centroid update).
-
-### 2.1 Decomposition
-
-We partition the `n` points into near-equal contiguous blocks, one block per
-worker. Each worker is responsible only for its own points and never needs
-another worker's raw points. The centroids, by contrast, are **small**
-(`K·d` numbers) and are needed in full by every worker, so every worker keeps a
-complete copy of the centroids.
-
-This choice is deliberate:
-
-- The per-point work (assignment) is uniform, so equal-size blocks give balanced
-  load without any dynamic scheduling.
-- Points are the big data (`n·d`); centroids are tiny (`K·d`). Partitioning the
-  big thing and replicating the small thing minimises both memory and
-  communication.
-
-### 2.2 What has to be communicated, and how often
-
-Each iteration, every worker can independently:
-
-- assign its local points to the nearest centroid, and
-- accumulate, for each cluster, the **partial sum** of its local points and a
-  **partial count** of how many it assigned.
-
-To finish the update step, the partial sums and partial counts from all workers
-must be added together. The crucial observation is that we communicate the
-**partial sums**, not the assignments. The partial sums are of size `K·d`
-(independent of `n`), whereas the assignments would be of size `n`. For our large
-run, `K·d = 128·64 = 8192` numbers versus `n = 3,000,000` — three orders of
-magnitude less traffic. This single design decision is why the method scales
-well.
-
-So the per-iteration pattern is:
-
-```
-every worker:  assign local points  ->  local partial sums + counts
-all workers:   SUM-reduce the partial sums + counts   (global reduction phase)
-every worker:  centroid_j = global_sum_j / global_count_j
-```
-
-The global reduction is the one communication-and-synchronisation *phase* per
-iteration. In our implementation it is realised as a small, fixed number of
-`MPI_Allreduce` collectives (sum the coordinate sums, sum the counts, and sum the
-scalar inertia/moved diagnostics — three in total; see Section 4.3), each of size
-`O(K·d)` or smaller. Its cost depends on `K·d` and the number of workers, but not
-on `n`, so as the dataset grows the reduction is amortised over more and more
-local compute.
-
-![Per-iteration dataflow of the MPI design: points are scattered once, each rank assigns its own block independently (green), and an `MPI_Allreduce` reduction phase (red) combines the small `O(K·d)` partial sums — the only synchronisation per iteration. (The phase is three `Allreduce` calls in the code: sums, counts, and the scalar diagnostics.)](../results/diagram_mpi_dataflow.svg){ width=90% }
-
-The imbalance this exploits is stark. Each iteration the assignment step performs
-`O(n·K·d)` work while the reduction moves only `K·d = 8192` floats, a ratio of
-millions-to-one for our dataset. This is the whole reason the method scales, and
-it is worth seeing to scale:
-
-![Per-iteration assignment compute (`O(n·K·d)`) dwarfs the reduction traffic (`O(K·d)`) by about six orders of magnitude; the reduction volume does not grow with `n`.](../results/comm_vs_compute.png){ width=55% }
-
-### 2.3 Two levels of parallelism
-
-We implement this plan at two levels, which map onto the two classical models of
-process interaction (message passing between separate memory pools, and shared
-memory within a device) and can be combined as the **MPI + X** pattern:
-
-- **MPI (between processes / nodes) — message passing.** Processes ("ranks")
-  each own a block of points in their own private memory and exchange data only
-  through explicit messages. The global reduction uses the `MPI_Allreduce`
-  collective. This is the standard way to parallelise across separate memory
-  pools and scales across the cores of a machine and across nodes of a cluster.
-  In Flynn's taxonomy this is a **MIMD** system: each rank runs its own
-  instruction stream over its own data.
-
-- **CUDA (within a process, on a GPU) — shared memory.** The assignment step for
-  one rank's block is offloaded to a GPU, with one GPU thread per point. A GPU is
-  a **SIMD**-style accelerator: it is built for exactly this kind of regular
-  floating-point arithmetic over large arrays, where many threads apply the same
-  instruction to different data. The GPU performs the local partial-sum
-  accumulation in its shared/global memory; the cross-rank combination is still
-  the same `MPI_Allreduce`. This targets the hot `O(n·K·d)` loop with thousands
-  of hardware threads.
-
-This is the **MPI + CUDA** structure recommended for the project: MPI handles
-inter-node parallelism, CUDA handles the intra-node (intra-GPU) compute, and the
-communication volume between ranks is unchanged from the pure-MPI version. The
-three programs we built are therefore: a **serial** baseline, an **MPI** (CPU)
-version, and an **MPI+CUDA** (GPU) version that nests CUDA inside the MPI
-decomposition.
-
-## 3. Serial baseline
-
-The serial program is a direct transcription of Lloyd's algorithm and serves as
-the correctness reference. Its core is the two-step loop. The assignment step
-finds the nearest centroid for each point and, in the same pass, accumulates the
-running sums used by the update step:
-
-```cpp
-for (int i = 0; i < n; ++i) {
-    const float* p = &ds.data[i * dims];
-    float best = std::numeric_limits<float>::max();
-    int bestj = 0;
-    for (int j = 0; j < k; ++j) {                 // nearest-centroid search
-        float d = km::dist2(p, &cents[j * dims], dims);
-        if (d < best) { best = d; bestj = j; }
-    }
-    assign[i] = bestj;
-    inertia += best;
-    float* srow = &sums[bestj * dims];            // accumulate for the update
-    for (int d = 0; d < dims; ++d) srow[d] += p[d];
-    counts[bestj]++;
-}
-
-// Update step: each centroid becomes the mean of its assigned points.
-for (int j = 0; j < k; ++j)
-    if (counts[j] > 0)
-        for (int d = 0; d < dims; ++d)
-            cents[j * dims + d] = sums[j * dims + d] / counts[j];
-```
-
-Everything below parallelises exactly this computation while keeping the result
-identical.
-
-## 4. MPI implementation (CPU)
-
-### 4.1 Distributing the data
-
-Rank 0 reads the dataset and seeds the centroids. The points are then handed out
-with `MPI_Scatterv` (near-equal contiguous blocks), and the seeded centroids are
-broadcast so every rank starts identically:
-
-```cpp
-// Near-equal contiguous blocks: first (n % nproc) ranks get one extra point.
-int base = n / nproc, rem = n % nproc, off = 0;
-for (int r = 0; r < nproc; ++r) {
-    cnt[r]  = base + (r < rem ? 1 : 0);
-    disp[r] = off;  off += cnt[r];
-}
-// Scatter the points (counts/displacements are in units of floats = dims each).
-MPI_Scatterv(rank == 0 ? full.data.data() : nullptr,
-             fcnt.data(), fdisp.data(), MPI_FLOAT,
-             local.data(), local_n * dims, MPI_FLOAT, 0, MPI_COMM_WORLD);
-
-// Everyone needs the same starting centroids.
-if (rank == 0) cents = km::kmeanspp_init(full, k, args.seed);
-MPI_Bcast(cents.data(), k * dims, MPI_FLOAT, 0, MPI_COMM_WORLD);
-```
-
-### 4.2 The parallel iteration
-
-Each rank runs the identical assignment loop as the serial version, but only over
-its **local** points, producing local partial sums and counts. The only new code
-is the global combination:
-
-```cpp
-// Local assignment over this rank's points -> local_sums, local_cnt, inertia.
-for (int i = 0; i < local_n; ++i) {
-    /* ... identical nearest-centroid search as serial ... */
-    float* srow = &local_sums[bestj * dims];
-    for (int d = 0; d < dims; ++d) srow[d] += p[d];
-    local_cnt[bestj]++;
-}
-
-// The global reduction phase: one synchronisation point, realised as three
-// MPI_Allreduce collectives (coordinate sums, counts, scalar diagnostics).
-MPI_Allreduce(local_sums.data(), global_sums.data(), k * dims,
-              MPI_FLOAT,     MPI_SUM, MPI_COMM_WORLD);
-MPI_Allreduce(local_cnt.data(),  global_cnt.data(),  k,
-              MPI_LONG_LONG, MPI_SUM, MPI_COMM_WORLD);
-double red[2]  = {local_inertia, (double)local_moved}, gred[2];
-MPI_Allreduce(red, gred, 2, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
-
-// Every rank now holds the global sums and recomputes identical centroids.
-for (int j = 0; j < k; ++j)
-    if (global_cnt[j] > 0) {
-        float inv = 1.0f / (float)global_cnt[j];
-        for (int d = 0; d < dims; ++d)
-            cents[j * dims + d] = global_sums[j * dims + d] * inv;
-    }
-```
-
-### 4.3 Design decisions
-
-Every step uses an MPI **collective communication** rather than hand-written
-point-to-point `MPI_Send`/`MPI_Recv`, because collectives are implemented with
-efficient communication patterns (e.g. a binary-tree reduction, which turns an
-`O(n)` serial combine into `O(log n)` across ranks) and are less error-prone than
-orchestrating sends and receives by hand.
-
-- **`MPI_Bcast` after serial initialisation.** The k-means++ seeding is done once
-  on rank 0 and broadcast — a textbook use of broadcast (distribute data produced
-  by a serial init step), and more efficient than many individual sends.
-- **`MPI_Scatterv` to distribute points.** The `v` variant lets the per-rank
-  block sizes differ by one point when `n` is not divisible by the rank count.
-- **`MPI_Allreduce`, not `MPI_Reduce` + `MPI_Bcast`.** A reduction combines data
-  from every rank into one result; the *All* variant additionally leaves that
-  result on *every* rank, so each rank can recompute the centroids itself. This
-  avoids a separate broadcast and avoids a privileged "master" rank, keeping the
-  ranks symmetric. The reduction phase is three `Allreduce` calls — the
-  coordinate sums (`k·d` floats), the per-cluster counts (`k` longs), and a
-  two-element scalar buffer carrying the summed inertia and moved-point count for
-  the iteration log. The counts could be packed with the sums to save a call, but
-  the datatypes differ (`float` vs `long long`) and the scalars are only
-  diagnostics, so we kept them separate for clarity; all three are `O(K·d)` or
-  smaller and independent of `n`.
-- **Reduce sums, not assignments.** The messages are `O(K·d)`, independent of
-  `n`, as planned in Section 2.2 — so communication volume does not grow with the
-  dataset.
-- **Contiguous block partition.** Simple, cache-friendly, and naturally balanced
-  because per-point work is uniform (no dynamic scheduling needed).
-- **One reduction phase's worth of synchronisation per iteration.** The three
-  back-to-back `Allreduce` calls form a single unavoidable barrier; everything
-  else is embarrassingly parallel. We use the default blocking collectives: the
-  risk with blocking communication is ranks idling at the barrier or deadlock,
-  but with symmetric `Allreduce`s per iteration and balanced load, neither is a
-  problem here.
-
-## 5. MPI + CUDA implementation (GPU)
-
-The GPU version keeps the exact MPI structure of Section 4 — scatter points,
-run the `Allreduce` reduction phase on the partial sums, recompute centroids —
-but replaces each rank's local assignment loop with a CUDA kernel. One MPI rank
-is bound to one GPU (`cudaSetDevice(rank % deviceCount)`); this maps one rank to
-one device provided the job places at most as many ranks on a node as it has
-GPUs, which the PBS scripts ensure by setting `mpiprocs = ngpus`.
-
-### 5.1 The assignment kernel
-
-One GPU thread handles one point. Centroids are staged in fast **shared memory**
-(they are small and read by every thread), each thread finds its nearest centroid,
-and then accumulates its contribution into the per-cluster sums with `atomicAdd` —
-the GPU equivalent of the serial running sum:
-
-```cpp
-__global__ void assign_kernel(const float* points, int local_n, int dims,
-                              const float* cents, int k,
-                              float* sums, int* counts, int* assign,
-                              double* inertia) {
-    extern __shared__ float s_cents[];                 // centroids in shared mem
-    for (int idx = threadIdx.x; idx < k * dims; idx += blockDim.x)
-        s_cents[idx] = cents[idx];
-    __syncthreads();
-
-    int i = blockIdx.x * blockDim.x + threadIdx.x;     // one thread per point
-    if (i >= local_n) return;
-
-    const float* p = points + i * dims;
-    float best = 3.4e38f; int bestj = 0;
-    for (int j = 0; j < k; ++j) {                      // nearest-centroid search
-        const float* c = s_cents + j * dims;
-        float d = 0.0f;
-        for (int dd = 0; dd < dims; ++dd) { float t = p[dd] - c[dd]; d += t * t; }
-        if (d < best) { best = d; bestj = j; }
-    }
-
-    assign[i] = bestj;
-    atomicAdd(inertia, (double)best);                  // reduction via atomics
-    atomicAdd(&counts[bestj], 1);
-    float* srow = sums + bestj * dims;
-    for (int dd = 0; dd < dims; ++dd) atomicAdd(&srow[dd], p[dd]);
-}
+<!-- Generated from the completed-run publication report. -->
+
+# Parallel K-means clustering with MPI and CUDA
+
+Distributed centroid reduction and GPU acceleration on Atlas and Vanda
+
+![Project figure](../assets/nus_logo_full-vertical.jpg)
+
+DSA5208 · Scalable Distributed Computing for Data Science
+
+| AUTHOR | STUDENT ID |
+| --- | --- |
+| AMRIT SATPATHY | A0355181E |
+| RITIK SRIVASTAVA | A0355860X |
+
+National University of Singapore · November 2026
+
+Source code and reproducible experiment records
+
+github.com/AmritSatpathy/parallelKmean [github.com/AmritSatpathy/parallelKmean](https://github.com/AmritSatpathy/parallelKmean)
+
+## Abstract
+
+K-means combines independent nearest-centroid searches with a globally coupled centroid update, making it a useful case study in distributed and accelerator computing. We implement Lloyd’s algorithm in serial C++, CPU MPI, and MPI+CUDA, sharing the same data representation and k-means++ seeding. MPI partitions points across ranks and combines local centroid statistics through three Allreduce collectives per iteration. CUDA replaces each rank’s local assignment loop with one thread per point while keeping cross-rank reductions on host buffers. Experiments use MNIST for real-data interpretation and synthetic Gaussian blobs for strong scaling. The Atlas 100-iteration workload covers three million 64-dimensional points and 128 clusters at 12, 16, 24, 32, and 48 ranks across six completed jobs. At 48 ranks, clustering takes 36.422506 s versus a job-matched serial baseline of 1722.174826 s, giving 47.28× speedup and 98.51% efficiency. A complementary 32-iteration study reaches 31.32× at 32 ranks across two nodes. Vanda GPU batches A and B both approximately halve runtime from one to two A40s; batch B takes 10.159337 s and 5.073951 s respectively, giving 2.002× speedup. Matching displayed inertia supports numerical agreement within matched workloads. The report integrates completed team experiments and distinguishes iteration-loop timings from initialization and scheduler wall time, while retaining clear limits on numerical identity and run-to-run variability.
+
+## 1. Introduction and objectives
+
+The project investigates how decomposition and synchronization affect the parallel scaling of a nontrivial algorithm. Lloyd’s K-means alternates nearest-centroid assignment and centroid recomputation [1]. The assignment step is independent across points, but the update requires statistics from every partition. The complete algorithm therefore requires communication and coordinated iteration, satisfying the assignment’s requirement to go beyond an embarrassingly parallel workload.
+
+Our objectives are to establish a serial correctness reference, explain the MPI design and its CUDA extension, measure strong scaling on Atlas and Vanda, and interpret clustering quality on MNIST. The implementation remains within the MPI+CUDA scope. Larger algorithms or additional programming frameworks are unnecessary to answer these questions.
+
+The completed experimental program covers CPU scaling through 48 MPI ranks, two fixed-iteration workload budgets, and GPU scaling through two devices in two measurement batches. All runs contribute to the same team study. Workload and batch labels preserve valid baseline comparisons while the execution ledger links the completed experiments to their evidence.
+
+## 2. Algorithm and datasets
+
+### 2.1 Objective, initialization, and iteration
+
+For n points xᵢ in d dimensions, K centroids μⱼ, and cluster assignment a(i), K-means minimizes the within-cluster sum of squared distances, or inertia. The squared distance avoids a square root without changing the nearest-centroid decision.
+
+J = ∑i=1…n ‖xi − μa(i)‖2 (1)
+
+All variants use k-means++ initialization [2], with a fixed seed for comparisons within a series. Each iteration assigns points to their nearest centroid, accumulates sums and counts, and replaces each nonempty centroid by the arithmetic mean of its assigned points. Empty clusters retain their previous centroid. Assignment costs O(nKd); centroid accumulation costs O(nd). K-means++ seeding costs O(nKd) overall and is performed once outside the timed clustering loop.
+
+The default convergence path tests relative inertia change; the CPU implementations also test whether assignments stopped moving. Benchmark runs instead pass --fixed-iter so that all configurations execute the same number of iterations. The log phrase “converged in” is therefore interpreted as “completed” for these fixed-iteration measurements, without claiming that a convergence criterion was met.
+
+### 2.2 Dataset definitions and comparability
+
+Table 1. Data used for quality analysis and performance experiments.
+
+| Dataset / experiment | Points | Features | K | Iterations |
+| --- | --- | --- | --- | --- |
+| MNIST, clustering quality | 70,000 | 784 | 10 | Convergence |
+| Synthetic, CPU scaling / GPU batch A | 3,000,000 | 64 | 128 | 32 fixed |
+| Synthetic, Atlas 12–48 ranks | 3,000,000 | 64 | 128 | 100 fixed |
+| Synthetic, GPU batch B | 3,000,000 | 64 | 128 | 32 fixed |
+| MNIST, Vanda smoke test | 70,000 | 784 | 10 | 10 fixed |
+
+MNIST combines 70,000 digit images, each flattened into 784 raw pixel features; column 0 is excluded from features and retained as a ground-truth digit label [3]. Synthetic Gaussian blobs contain planted cluster labels, again in column 0. The generator supplies controllable n, d, K, seed, and separation, making it suitable for a fixed-workload scaling experiment.
+
+Workload comparability. The 100-iteration Atlas workload reports inertia 1.214576×10⁹, whereas Vanda synthetic runs report approximately 8.624057×10⁸. The Atlas and Vanda datasets downloaded on 12 November are byte-identical by SHA-256; both copies contain three million rows. Historical jobs did not record contemporaneous input hashes. The iteration budgets differ, so these timings are not pooled into a controlled cross-platform speedup.
+
+## 3. Parallel architecture and design decisions
+
+### 3.1 MPI decomposition and global synchronization
+
+Figure 1 shows the distributed execution path. Rank 0 reads the numeric CSV and seeds centroids. MPI_Scatterv sends near-equal contiguous point blocks to ranks; the first n mod p ranks receive one extra point. MPI_Bcast distributes the common initial centroids. A point belongs to exactly one partition, while all ranks keep the small K×d centroid array.
+
+![Project figure](figures_publication/01_mpi_architecture.png)
+
+Figure 1. Point decomposition and the globally coupled update. Solid arrows show data flow; dashed arrows show iteration control.
+
+Every rank performs a local assignment loop and produces K×d coordinate sums, K counts, and scalar diagnostics. Three MPI_Allreduce calls combine these arrays, leaving every rank with the global statistics needed to calculate identical new centroids. This follows the collective semantics defined by MPI [4]. The coordinate-sum reduction communicates 8192 floats for K=128 and d=64, independent of n; counts and diagnostics add small separate messages.
+
+Allreduce is used instead of a root-only Reduce followed by a separate broadcast because every rank immediately needs the updated global state. Keeping coordinates and counts in separate collectives preserves their different MPI datatypes. Counts use long long; inertia uses double. CPU sums and input points use float, conserving memory but allowing small changes from floating-point reduction order.
+
+### 3.2 MPI+CUDA execution and memory movement
+
+CUDA changes how each rank computes its local statistics. Figure 2 shows the implemented host-staged pipeline. Each rank selects a GPU, copies local points once, and launches a kernel with 256 threads per block and one thread per point. Centroids use shared memory when the K×d array fits; otherwise the kernel reads them from global memory. Threads accumulate sums, counts, and inertia with atomicAdd. CUDA execution and memory behavior follow the toolkit programming guide [5].
+
+![Project figure](figures_publication/02_cuda_architecture.png)
+
+Figure 2. Two-rank GPU path. Partial statistics return to host memory before MPI_Allreduce; this implementation does not perform reductions directly on device pointers.
+
+Before each kernel launch, current centroids are copied to the device and partial accumulators are zeroed. After the kernel completes, small partial arrays are copied to the host. MPI combines them, each rank updates centroids on the host, and the cycle repeats. This avoids transferring the large point array every iteration, although it still incurs host/device synchronization and atomic contention.
+
+GPU selection is rank modulo visible device count. This supports the measured one-node, one- and two-GPU jobs when the requested devices are visible to each rank. A general multi-node extension should use node-local rank and verify CUDA_VISIBLE_DEVICES. No claim of multi-node GPU validation is made here.
+
+### 3.3 Trade-offs and expected scaling limits
+
+Contiguous near-equal partitions balance a uniform O(Kd) assignment cost per point. Replicating centroids avoids remote reads during nearest-centroid searches. The global reductions provide the necessary dependency between iterations, so removing them would change Lloyd’s algorithm. At high rank counts, fixed collective latency and shrinking local work can reduce efficiency. CPU memory bandwidth, SIMD behavior, cache reuse, and GPU atomic contention may also matter; the saved timings do not isolate these mechanisms.
+
+Rank 0 remains responsible for CSV parsing and initialization and retains the full input while local blocks are allocated. This limits end-to-end scalability and memory distribution, even when the clustering loop scales well. Optional label gathering and output also occur after the reported clustering interval. These boundaries are kept explicit throughout the evaluation.
+
+## 4. Experimental protocol and timing
+
+Strong scaling holds the dataset, K, seed, and iteration budget fixed while increasing ranks or GPUs. We calculate speedup and efficiency using the serial baseline for CPU MPI, and the one-GPU baseline for GPU-only scaling. The use of different baselines is intentional and labelled in every table.
+
+S(p) = Tserial / T(p),     E(p) = S(p) / p (2)
+
+For GPU scaling, Tserial in Equation (2) is replaced by the one-GPU runtime and p denotes GPU count. A value slightly above 100% efficiency is retained as measured, rather than capped; it may reflect ordinary timing variation and does not establish superlinear behavior. Each comparison is made inside its own experiment series.
+
+Table 2. Project execution environments by experiment group.
+
+| Experiment group | Platform / configuration | Toolchain / evidence |
+| --- | --- | --- |
+| Local runs | Ryzen 7 6800HS; 8 cores / 16 threads; RTX 3050 Ti | GCC 13; OpenMPI 4.1; project records |
+| Atlas scaling | 1-node 16-rank and 2-node 32-rank series | GCC 13.2; OpenMPI 4.1.6; project records |
+| Vanda batch A | 1–2 NVIDIA A40 GPUs | GCC 13.2; OpenMPI 4.1.6; CUDA 12.4 |
+| Atlas 100 iterations | 12, 16, 24, 32, 48 ranks; one node per job | GCC 7.3 / OpenMPI 4.1.1; retained execution logs |
+| Vanda batch B | GN-A40-021 and GN-A40-035; 1–2 A40s | GCC 13.2; OpenMPI 4.1.6; CUDA 12.4 in logs |
+
+The CPU harness runs serial before the MPI configurations. REPS controls repetition and retains the minimum successful time, while fixed iterations ensure comparable iteration counts. The extended Atlas study retains one timing pair per job, including two independent 16-rank jobs. Vanda batch B retains one timing per configuration. Historical repetition counts are not inferred when the retained CSV does not encode them. MPI barriers bracket the distributed timed loop; the GPU loop also synchronizes CUDA work before completing an iteration.
+
+Reported time is the clustering loop, including per-iteration computation, host/device copies where applicable, and collective communication. PBS wall time additionally includes build, data generation, CSV read, initialization, process launch, and other job overhead. These are different performance measures. For Vanda batch B, CSV loading alone takes 24.840 s on one GPU and 23.348 s on two, outside the reported 10.159337 s and 5.073951 s clustering times.
+
+## 5. Correctness and real-data interpretation
+
+### 5.1 Numerical agreement within each experiment series
+
+Table 3. Consolidated project validation evidence, with its comparison protocol.
+
+| Evidence | Comparison | Observed result |
+| --- | --- | --- |
+| MNIST label validation | Serial versus 8-rank MPI | 100% label agreement; inertia 1.784862×10¹¹; 13 iterations |
+| Small synthetic blobs | Serial versus 2/4/8-rank MPI | 99.7–99.9% label agreement; inertia difference ~10⁻⁶ |
+| Large synthetic blobs | Serial / MPI / MPI+CUDA | Inertia 8.624057–8.624058×10⁸ |
+| Atlas, 100 iterations | Serial versus 12/16/24/32/48 ranks | All twelve outputs print inertia 1.214576×10⁹ |
+| Vanda batch B, 32 iterations | 1 versus 2 GPUs | Both print inertia 8.624057×10⁸ |
+| GPU MNIST smoke test | 1 GPU, 10 iterations | Inertia 1.785707×10¹¹; exit status 0 (session record) |
+
+The label comparisons and purity tests are recorded in the project study; their label files and raw validation transcripts are not present in this checkout. Additional inertia checks are supported by the retained CSV and log records. Equality at printed precision supports numerical agreement but does not prove bitwise-equal centroids or labels. Floating-point addition is non-associative, so MPI reduction order and CUDA atomic order can shift boundary assignments [4], [5].
+
+Figure 3 uses the newly retained per-iteration Vanda log lines. Both GPU trajectories drop rapidly and then approach the same displayed objective. This provides evidence that parallel execution preserves the iterative behavior, in addition to matching the final diagnostic. The inertia is evaluated during assignment before the subsequent centroid update, matching the source implementation.
+
+![Project figure](figures_publication/06_gpu_inertia.png)
+
+Figure 3. Recorded objective trajectories for Vanda jobs 1533324 and 1533344: solid blue with circles (1 GPU), dashed orange with diamonds (2 GPUs). Markers are staggered for visibility; the nearly overlapping values show within-series numerical agreement.
+
+### 5.2 Conclusions about MNIST
+
+The project reports approximately 0.585 cluster purity for K=10 on raw MNIST pixels. Purity is the sum of each predicted cluster’s largest true-label count divided by n. Reported majority fractions are approximately 0.94 for a 0-dominated cluster, 0.91 for a 2-dominated cluster, and 0.86 for a 6-dominated cluster. Stroke-similar digits such as 4/7/9 and 3/5/8 are confused. These observations are clustering results, not supervised classification accuracy.
+
+Raw-pixel Euclidean distance captures broad shape but is sensitive to position and handwriting variation. Ten digit labels do not force an unsupervised method to discover ten perfectly corresponding groups. The synthetic quality study reports 0.977 purity with 126 of 128 clusters perfectly pure. Feature transformations or alternative clustering methods are outside this project’s MPI+CUDA scope.
+
+## 6. Results: CPU and GPU strong scaling
+
+The project’s strong-scaling experiments evaluate CPU ranks and GPU devices while fixing the workload within each comparison. All measurements are retained in the project results collection. CPU results are grouped by allocation, and GPU measurements use batch labels to identify their respective one-GPU baselines. The consolidated scheduler ledger in Appendix A connects available job identifiers to their evidence.
+
+### 6.1 CPU strong scaling on the workstation and Atlas
+
+Table 4. MPI clustering runtimes and two-node-allocation scaling (32 fixed iterations).
+
+| Ranks | Local (s) | Atlas 1-node (s) | Atlas 2-node (s) | Speedup¹ | Efficiency¹ |
+| --- | --- | --- | --- | --- | --- |
+| 1 | 602.023466 | 411.266999 | 403.764122 | 1.002 | 100.20% |
+| 2 | 313.362682 | 207.032807 | 202.415090 | 1.999 | 99.93% |
+| 4 | 163.921646 | 103.254665 | 100.884918 | 4.010 | 100.25% |
+| 8 | 87.772567 | 51.113357 | 50.488409 | 8.013 | 100.16% |
+| 16 | 65.390376 | 25.705913 | 25.333105 | 15.970 | 99.81% |
+| 32 | — | — | 12.916530 | 31.322 | 97.88% |
+
+¹ Two-node-allocation metrics use its own serial baseline of 404.566169 s. The corresponding baselines are 597.873896 s locally and 404.444328 s for the single-node Atlas allocation. The 1-rank row above is MPI, not serial. The project records describe ranks filling one node through 16, then both nodes at 32; per-rank placement logs were not retained.
+
+![Project figure](figures_publication/03_original_cpu_scaling.png)
+
+Figure 4. CPU strong scaling with matched serial baselines. The workstation shows a stronger efficiency decline at 16 ranks.
+
+The two-node Atlas allocation reaches 31.3216× speedup at 32 ranks and 97.88% efficiency. The single-node allocation reaches 15.7335× at 16 ranks. Locally, speedup is 6.8116× at eight ranks and 9.1431× at 16 ranks. The workstation’s eight physical cores and 16 logical threads make shared execution resources a plausible contributor to the local efficiency decline; the timings do not separately measure SMT, bandwidth, or communication costs.
+
+### 6.2 CUDA scaling: measurement batch A
+
+Table 5. GPU measurement batch A and the local accelerator reference.
+
+| Configuration / source | Time (s) | Within-series comparison |
+| --- | --- | --- |
+| Local RTX 3050 Ti (project report) | 35.2 | ~16.98× versus local serial 597.873896 s |
+| Vanda 1 A40, standalone CSV | 8.627849 | Independent earlier 1-GPU measurement |
+| Vanda 1 A40, paired-series CSV | 8.622686 | GPU baseline |
+| Vanda 2 A40s, paired-series CSV | 4.309527 | 2.0008× speedup; 100.04% efficiency |
+
+The project’s cross-platform reference compares the two-GPU time of 4.309527 s with the Atlas serial baseline of 404.566169 s, giving approximately 93.88×. This is a cross-platform comparison: hardware, compiler, and placement differ, so it does not isolate processor count. GPU scaling metrics use the matched one-GPU baseline. The local 35.2 s GPU time is recorded in the project report rather than a retained standalone result log.
+
+## 7. Results: extended workload and GPU verification
+
+### 7.1 Atlas strong scaling: 100 fixed iterations
+
+Table 6. Completed Atlas 100-iteration jobs; each speedup uses the serial baseline from the same job.
+
+| PBS job ID | Ranks | Serial (s) | MPI (s) | Speedup | Efficiency |
+| --- | --- | --- | --- | --- | --- |
+| 1036952.venus01 | 12 | 1704.105486 | 142.843514 | 11.9299× | 99.42% |
+| 1034257.venus01 | 16 | 1703.059729 | 108.220590 | 15.7369× | 98.36% |
+| 1037018.venus01 | 16 | 1716.061499 | 106.207582 | 16.1576× | 100.99% |
+| 1037036.venus01 | 24 | 1728.390679 | 70.887738 | 24.3821× | 101.59% |
+| 1036751.venus01 | 32 | 1694.752549 | 53.819387 | 31.4896× | 98.41% |
+| 1036776.venus01 | 48 | 1722.174826 | 36.422506 | 47.2833× | 98.51% |
+
+![Project figure](figures_publication/05_atlas_full_load.png)
+
+Figure 5. One project scaling series across six completed jobs at 12–48 ranks. Dots retain individual MPI measurements; connecting lines and runtime labels use the median at repeated rank counts. Each speedup uses its own job’s serial baseline; runtime is logarithmic.
+
+The added 12-, 16-, and 24-rank jobs take 142.843514 s, 106.207582 s, 70.887738 s respectively. Their job-matched speedups are 11.9299×, 16.1576×, 24.3821×, with efficiencies of 99.42%, 100.99%, 101.59%. The earlier completed 16-rank result remains in Table 6 alongside the new measurement. Every serial and MPI row reports 3,000,000 points, 64 dimensions, K=128, 100 iterations, and inertia 1.214576×10⁹. All six PBS logs confirm exit status 0 and one allocated node per job.
+
+The new jobs ran on cnode-33-43-26 (12 ranks) and cnode-33-43-53 (16 and 24 ranks), with PBS wall times 00:35:22, 00:32:02, and 00:31:30 respectively. Earlier 16-, 32-, and 48-rank jobs have wall times 00:32:56, 00:36:17, and 00:31:13. These include serial baselines and setup; they are not MPI clustering times. Job-matched serial baselines span 1694.752549–1728.390679 s. Efficiencies slightly above 100% are retained as measured and may reflect cache or timing variation; these few observations do not establish superlinear scaling.
+
+### 7.2 CUDA scaling: measurement batch B
+
+Table 7. Vanda GPU measurement batch B, 8 November 2026; 32 fixed iterations.
+
+| PBS job ID | Node | GPUs / ranks | Time (s) | GPU speedup |
+| --- | --- | --- | --- | --- |
+| 1533324.stdct-mgmt-02 | GN-A40-021 | 1 / 1 | 10.159337 | 1.0000 |
+| 1533344.stdct-mgmt-02 | GN-A40-035 | 2 / 2 | 5.073951 | 2.0023 |
+
+![Project figure](figures_publication/04_gpu_series.png)
+
+Figure 6. Project GPU scaling across two measurement batches. Each speedup uses the corresponding one-GPU baseline; all recorded timings remain visible.
+
+Batch B achieves 2.0023× GPU speedup, with 100.11% efficiency. This is approximately ideal scaling; one observation per configuration cannot establish statistically significant superlinear performance. Both runs print final inertia 8.624057×10⁸ and the terminal session records exit status 0. The supplied log copies contain complete iteration trajectories but omit PBS footer summaries; scheduler wall times of 00:01:43 and 00:00:53 are therefore attributed to the recorded qstat output, not inferred from the shorter log files.
+
+The logs confirm GCC 13.2.0, OpenMPI 4.1.6, CUDA 12.4, and compilation for sm_86. They also contain nonfatal OpenMPI warnings that libpbs.so.0 could not be loaded for the TM launcher and resource components; those messages were explicitly ignored and the one-node runs produced results. Successful local execution does not establish functioning multi-node PBS integration. Host memory figures reported by PBS are not GPU VRAM utilization.
+
+## 8. Discussion, limitations, and conclusion
+
+### 8.1 What the measurements establish
+
+The Atlas scaling curves and extended workload show that local assignment work can dominate collective overhead at the tested problem size. The small centroid statistics explain why communication can be amortized over millions of points. Both GPU measurement batches support the same decomposition across two accelerators. These measurements support the design, while a communication-only profile would be needed to attribute exact percentages of runtime to Allreduce, computation, or memory movement.
+
+K-means is not embarrassingly parallel as a whole: every centroid update depends on globally reduced statistics and precedes the next assignment. The CUDA implementation keeps that dependency intact while increasing local throughput. The six completed 100-iteration jobs show near-ideal measured scaling over 12–48 ranks, with efficiencies of approximately 98.4–101.6%. These results establish performance over the measured range; additional evidence would be needed to extend the conclusion to larger configurations.
+
+### 8.2 Limits of evidence and interpretation
+
+Only strong scaling is measured. Completed CPU experiments cover up to 48 ranks and GPU experiments up to two A40s on one node. The retrieved Atlas and Vanda inputs have matching checksums. Historical job-time hashes and complete build manifests were not retained. Similar printed inertia is a useful diagnostic rather than a complete proof of identical cluster assignments. Local runs are identified by their execution platform and recorded results rather than PBS job IDs.
+
+The extended Atlas study contains two independent 16-rank jobs and one job at each other rank count; GPU batch B has one timing per configuration. These observations do not provide confidence intervals. The harness selects a minimum when repeated, but raw repetitions are not stored in the CSV. Comparisons are measured examples under shared-cluster conditions. Scheduler allocation counts may exceed active MPI ranks: Vanda assigned 36 CPU slots for one GPU and 72 for two in the session record, while the code launched only one or two ranks.
+
+### 8.3 Conclusion
+
+The project delivers serial, MPI CPU, and MPI+CUDA implementations of the same Lloyd iteration, with explicit global centroid reductions and completed HPC timing evidence. The Atlas 100-iteration workload covers 12, 16, 24, 32, and 48 ranks across six completed jobs. It reaches 47.28× speedup at 48 ranks, with measured efficiencies spanning approximately 98.4–101.6% across the study. The complementary 32-iteration study reaches 31.32× at 32 ranks across two nodes. Both Vanda measurement batches achieve approximately 2.00× speedup from one to two A40s. MNIST illustrates the limits of raw-pixel clustering, while numerical comparisons support correctness within matched workloads. The principal contribution is the measured relationship between point-level parallel work and the synchronized centroid update, supported by the team’s completed execution records.
+
+## References
+
+[1] S. Lloyd, “Least squares quantization in PCM,” IEEE Transactions on Information Theory, vol. 28, no. 2, pp. 129–137, 1982. Online source [Online source](https://doi.org/10.1109/TIT.1982.1056489)
+
+[2] D. Arthur and S. Vassilvitskii, “k-means++: The advantages of careful seeding,” Proc. 18th ACM–SIAM Symposium on Discrete Algorithms, pp. 1027–1035, 2007. Online source [Online source](https://theory.stanford.edu/~sergei/papers/kMeansPP-soda.pdf)
+
+[3] Y. LeCun, C. Cortes, and C. J. C. Burges, “The MNIST database of handwritten digits.” Dataset source. Online source [Online source](https://yann.lecun.com/exdb/mnist/)
+
+[4] Message Passing Interface Forum, MPI: A Message-Passing Interface Standard, version 4.1, November 2023. Standard reference; deployed OpenMPI versions are separately recorded in Table 2. Online source [Online source](https://www.mpi-forum.org/docs/mpi-4.1/mpi41-report.pdf)
+
+[5] NVIDIA, CUDA C++ Programming Guide, toolkit version 12.4, 2024. Online source [Online source](https://docs.nvidia.com/cuda/archive/12.4.0/cuda-c-programming-guide/index.html)
+
+[6] National University of Singapore, University Policy Workgroup for AI in Teaching and Learning, Policy for the Use of AI in Teaching and Learning, current version 15 September 2026, §§2.5–2.6, 3–4. Accessed 8 November 2026. Online source [Online source](https://ctlt.nus.edu.sg/wp-content/uploads/2026/04/Policy-for-Use-of-AI-in-Teaching-and-Learning.pdf)
+
+[7] NUS Libraries, “Citation Styles: Citing AI Tools,” updated 28 August 2026. Accessed 8 November 2026. Online source [Online source](https://libguides.nus.edu.sg/citation/ai)
+
+[8] AI acknowledgment. The team used GPT 6.1 Astra, GPT 6.1 Solo, GPT 6 Astra, Claude, ChatGPT/Codex, and Kiro for coding, HPC troubleshooting, analysis, diagrams, and writing. Both authors reviewed the work and retain full responsibility for its accuracy and submission, following NUS guidance [6], [7].
+
+[9] A. Satpathy and R. Srivastava, Parallel K-means project repository: source, experiment CSV files, consolidated HPC logs, and report, 2026. Referenced throughout Appendices A–B. Online source [Online source](https://github.com/AmritSatpathy/parallelKmean)
+
+## Appendix A. Experiment provenance and scheduler ledger
+
+This ledger consolidates the team’s completed local and HPC experiments used in the report [9]. Local runs are identified by platform and configuration. Completed HPC jobs retain their documented scheduler identifiers. Artifact checksums in report/experiment_manifest.json identify the retained CSV and log evidence.
+
+Table A1. Completed project measurements by execution platform.
+
+| Measurement artifact / record | Coverage | Execution |
+| --- | --- | --- |
+| scaling_big.csv | Serial + MPI ranks 1–16 | Local run — CPU |
+| RTX 3050 Ti result: 35.2 s | One-GPU CUDA reference | Local run — CUDA |
+| scaling_atlas.csv | Serial + MPI ranks 1–16 | Atlas CPU |
+| scaling_atlas_2node.csv | Serial + MPI ranks 1–32 | Atlas CPU, two-node allocation |
+| scaling_vanda_gpu.csv | Standalone one-GPU result | Vanda GPU |
+| scaling_vanda_multi.csv | Batch A: one and two GPUs | Vanda GPU |
+
+Table A2. Project scheduler ledger: successful runs with retained job identifiers.
+
+| Job identifier | Purpose / outcome | Evidence retained |
+| --- | --- | --- |
+| 1027948.venus01 | Atlas MNIST sweep; exit 0; 00:04:33 | pbs/logs/atlas/1027948.venus01.OU |
+| 1034257.venus01 | Atlas synthetic serial + 16 ranks; 100 iterations; exit 0 | pbs/logs/1034257.venus01.OU |
+| 1036751.venus01 | Atlas serial + 32 ranks; 100 iterations; exit 0 | pbs/logs/atlas/1036751.venus01.OU |
+| 1036776.venus01 | Atlas serial + 48 ranks; 100 iterations; exit 0 | pbs/logs/atlas/1036776.venus01.OU |
+| 1036952.venus01 | Atlas serial + 12 ranks; 100 iterations; exit 0 | pbs/logs/atlas/1036952.venus01.OU |
+| 1037018.venus01 | Atlas serial + 16 ranks; 100 iterations; exit 0 | pbs/logs/atlas/1037018.venus01.OU |
+| 1037036.venus01 | Atlas serial + 24 ranks; 100 iterations; exit 0 | pbs/logs/atlas/1037036.venus01.OU |
+| 1533323.stdct-mgmt-02 | Vanda MNIST test; 10 iterations; exit 0 | Completed session record |
+| 1533324.stdct-mgmt-02 | Vanda 1 A40; 32 iterations; exit 0 | pbs/logs/vanda/vanda_1gpu_full.OU |
+| 1533344.stdct-mgmt-02 | Vanda 2 A40s; 32 iterations; exit 0 | pbs/logs/vanda/vanda_2gpu_full.OU |
+
+The Vanda log copies were renamed descriptively during download. Their full PBS identifiers are preserved from the terminal’s original log filenames: 1533324.stdct-mgmt-02.OU and 1533344.stdct-mgmt-02.OU. The log bodies corroborate node, ranks, toolkit, iteration count, inertia, and runtime; they do not themselves contain a JobId field.
+
+## Appendix B. Reproducibility, architecture details, and artifacts
+
+### B.1 Source-to-experiment map
+
+Table B1. Implementation and experiment entry points.
+
+| File | Role |
+| --- | --- |
+| src/common.hpp | Numeric CSV, k-means++, distance, timing, output |
+| src/kmeans_serial.cpp | Serial correctness and performance reference |
+| src/kmeans_mpi.cpp | Scatterv decomposition and global centroid statistics |
+| src/kmeans_mpi_cuda.cu | GPU assignment and host-staged MPI reductions |
+| scripts/run_scaling.sh | CPU sweep; fixed iterations and optional best-of-repetitions |
+| pbs/atlas_sweep.pbs; pbs/vanda_cuda.pbs | PBS CPU/GPU execution, build, and dataset generation |
+
+A benchmark run uses --label-col 0, the selected seed, --max-iter N, and --fixed-iter. MNIST validation runs may omit --fixed-iter to test convergence and export labels. The commands below illustrate reproduction using the provided source; they are not additional execution claims.
+
+### B.2 Atlas and Vanda submission examples
+
+```bash
+mkdir -p bin data results pbs/logs
+qsub -l select=1:ncpus=48:mpiprocs=48:mem=40gb \
+  -l walltime=02:00:00 \
+  -v "CSV=data/blobs_big.csv,K=128,PROCS=48,MAXIT=100,REPS=1" \
+  pbs/atlas_sweep.pbs
 ```
 
-### 5.2 The host-side iteration
+For other completed CPU configurations, replace all three occurrences of 48 above with 12, 16, 24, or 32. Use a separate working directory per job to preserve binaries and result files. On Atlas 9 the working script uses explicit GCC 7.3 and OpenMPI 4.1.1 paths and a clean library path. Compilation uses the compute node’s CPU flags, including -march=native; binaries are rebuilt inside the scheduled job.
 
-The points are copied to the device **once** before the loop (they never change).
-Each iteration resets the device accumulators, uploads the small centroid array,
-launches the kernel, copies the small partial results back, and feeds them into
-the *same* reduction phase as the CPU version:
-
-```cpp
-for (iter = 0; iter < max_iter; ++iter) {
-    cudaMemcpy(d_cents, cents.data(), k*dims*sizeof(float), H2D);  // small upload
-    cudaMemset(d_sums,    0, k*dims*sizeof(float));   // reset accumulators
-    cudaMemset(d_counts,  0, k*sizeof(int));          //   every iteration
-    cudaMemset(d_inertia, 0, sizeof(double));         //   (no carry-over)
-
-    assign_kernel<<<blocks, TPB, shmem>>>(d_points, local_n, dims, d_cents, k,
-                                          d_sums, d_counts, d_assign, d_inertia);
-    cudaGetLastError();            // catch launch errors
-    cudaDeviceSynchronize();       // kernel done before we read the results back
-
-    cudaMemcpy(h_sums.data(),   d_sums,   k*dims*sizeof(float), D2H);
-    cudaMemcpy(h_counts.data(), d_counts, k*sizeof(int),        D2H);  // int on device
-    cudaMemcpy(&local_inertia,  d_inertia, sizeof(double),      D2H);
-    // Promote int device counts to long long to match the MPI datatype below.
-    for (int j = 0; j < k; ++j) local_cnt[j] = h_counts[j];
-
-    // Same three-call reduction phase as the pure-MPI version.
-    MPI_Allreduce(h_sums.data(),  g_sums.data(), k*dims, MPI_FLOAT,     MPI_SUM, comm);
-    MPI_Allreduce(local_cnt.data(), g_cnt.data(), k,     MPI_LONG_LONG, MPI_SUM, comm);
-    MPI_Allreduce(&local_inertia, &g_inertia,    1,      MPI_DOUBLE,    MPI_SUM, comm);
-    /* recompute centroids from g_sums / g_cnt, exactly as before */
-}
+```bash
+module load GCC/13.2.0 OpenMPI/4.1.6-GCC-13.2.0 CUDA/12.4.0
+qsub -l select=1:ncpus=72:ngpus=2:mpiprocs=2:mem=480gb \
+  -l walltime=01:00:00 \
+  -v "NP=2,CSV=data/blobs_big.csv,K=128,MAXIT=32,SEED=42,CUDA_ARCH=sm_86" \
+  pbs/vanda_cuda.pbs
 ```
 
-Note the count datatypes: the kernel accumulates counts into a device `int`
-array (`atomicAdd` on `int` is fast), which is copied to a host `int` buffer and
-then promoted to `long long` before the `MPI_LONG_LONG` reduction, so the MPI
-datatype matches the reduced buffer. The device accumulators (`d_sums`,
-`d_counts`, `d_inertia`) are zeroed at the top of every iteration, so no values
-carry across iterations, and `cudaDeviceSynchronize()` guarantees the kernel has
-finished before the partial results are copied back and reduced.
+For one GPU use ncpus=36, mem=240gb, ngpus=1, mpiprocs=1, and NP=1, matching the recorded Vanda allocation. Both GPU counts should use the same dataset file and seed. PBS directives must not have trailing inline comments. Submit from the repository root and pre-create pbs/logs and data; compilation and large data generation run inside the allocation.
 
-![MPI + CUDA memory and data movement. The big `O(n·d)` point array crosses the PCIe link exactly once (thick green); every iteration moves only the small `O(K·d)` centroids down and partial sums back (blue dashed). Inside the kernel, centroids are staged in shared memory and results accumulated with `atomicAdd`.](../results/diagram_cuda_memory.svg){ width=95% }
+### B.3 Validation and job inspection
 
-### 5.3 Design decisions
+```bash
+python3 scripts/compare_labels.py results/serial.labels results/mpi.labels
+python3 scripts/validate.py --pred results/mpi.labels \
+  --csv data/mnist.csv --truth-col 0
+qstat -x -f JOB_ID
+grep "^RESULT" pbs/logs/JOB_ID*.OU
+```
 
-GPU performance is usually limited by memory movement rather than arithmetic, so
-most of these decisions are about memory, not compute.
+A completed benchmark is checked using exit status 0 together with its RESULT or CSV rows, expected n/d/K, rank count, iteration count, and final inertia. Each of the six 100-iteration Atlas jobs contains its serial and MPI rows, and the Vanda logs contain the expected one- and two-GPU results.
 
-- **Points uploaded once.** The host↔device PCIe link is one of the slow
-  communication paths in the machine, so moving data across it is minimised: the
-  points are constant across iterations and copied to the device a single time.
-  Per-iteration traffic is then only the `O(K·d)` centroid upload and the
-  `O(K·d)` partial-sum download — never the `O(n·d)` dataset.
-- **Centroids in shared memory.** Shared memory lives physically close to the GPU
-  cores and is far faster than global memory. Every thread reads every centroid,
-  so staging the centroids in `__shared__` memory (with one cooperative load per
-  block, then a `__syncthreads()`) turns `K` repeated global reads per thread
-  into one shared-memory read — the same tiling idea used for cache reuse on the
-  CPU.
-- **Coalesced access to the points.** Points are stored row-major and the hot
-  reads run over a point's contiguous coordinates, so threads in a warp read
-  neighbouring addresses; this lets the hardware coalesce accesses and use the
-  full memory-bus width.
-- **Little warp divergence.** The kernel's only branch is the nearest-centroid
-  `if (d < best)`, a simple min-tracking update rather than a data-dependent
-  control split, so threads in a warp follow essentially the same path and the
-  SIMD units stay busy.
-- **Accumulation via `atomicAdd`.** This is the GPU form of the serial reduction:
-  each point adds its coordinates into its chosen cluster's sum, its count, and
-  the global inertia. Atomics serialise concurrent updates to the same address,
-  so they are a potential bottleneck. The number of *distinct* targets is bounded
-  by `K` (points land in only `K` coordinate-sum rows and `K` counts), but that
-  does **not** by itself make atomics cheap: a small `K` means many threads
-  contend for the *same* few addresses, which can actually increase collisions,
-  and every point also contends on the single global inertia accumulator. What
-  keeps it acceptable here is that the atomic traffic is still `O(n)` additions
-  spread over the kernel while the distance arithmetic is `O(n·K·d)`, so for our
-  `K=128, d=64` the atomics are a small share of kernel time — but we did not
-  isolate their cost with a profiler, so we treat this as a reasonable-cost
-  choice rather than a measured one. A two-stage reduction (accumulate per block
-  in shared memory, then one atomic per block per cluster) would cut contention
-  and is the standard next optimisation; we did not need it to meet the project's
-  goals and did not benchmark it.
-- **One rank per GPU, same `MPI_Allreduce` as the CPU path.** The rank↔GPU
-  mapping (`cudaSetDevice(rank % deviceCount)`) means no explicit device
-  switching and no increase in inter-rank communication volume versus the
-  CPU version — the recommended MPI+CUDA structure. The GPU only changes *how* a
-  rank computes its local partial sums; the distributed algorithm is unchanged,
-  which keeps the GPU and CPU results directly comparable. (Copying the partial
-  sums to the host before `MPI_Allreduce` is the portable path; on a
-  CUDA-aware MPI build the device pointers could be passed to `MPI_Allreduce`
-  directly, avoiding the staging copy — a possible optimisation.)
+### B.4 Data preservation and report build
 
-## 6. Validation (correctness)
+The report builder reads CSV files and logs but does not modify them or submit jobs. Generated charts are stored under report/figures_publication/ as PNG and SVG. report/experiment_manifest.json records artifact hashes and known run IDs. The editable report is report/Parallel_Kmeans_Project_Report.docx, and its rendered counterpart is report/Parallel_Kmeans_Project_Report.pdf. The Markdown source report/report.md also records the project’s extended experiments.
 
-**Parallel vs serial.** With identical seeds, the parallel versions reproduce the
-serial baseline.
-
-- MNIST, `K=10`, 8 MPI ranks: assignments **100% identical** to serial
-  (`scripts/compare_labels.py` → raw and best-permutation agreement both
-  `1.0000`), final inertia `1.784862e+11` in both, same 13 iterations (verified
-  by re-running serial and MPI on the 70,000×784 MNIST set). The GPU version uses
-  the same algorithm and reduction.
-- Large blobs (`n=3,000,000, d=64, K=128`), 32 fixed iterations: the final
-  inertia **agrees to six significant figures** across serial, MPI (1–16 ranks),
-  and GPU — serial/MPI `8.624057e+08`, some parallel configurations
-  `8.624058e+08` — a relative difference of about `1.2×10⁻⁷` (the values differ
-  only in their seventh displayed digit). Assignment agreement with the serial
-  baseline is very high but not bit-exact at this large `K`; on the small blobs
-  set (`n=50,000, K=15`), where we re-ran the comparison directly, serial and MPI
-  agree on `99.7–99.9%` of labels depending on rank count, with the mismatches
-  confined to boundary points (see below).
-
-**On the floating-point difference.** The large-`K` case does not reach a
-bit-exact 100% label match, and this is expected, correct behaviour rather than a
-bug. It is a direct consequence of a fundamental property of floating-point
-arithmetic: because reals are stored with finite precision, floating-point
-addition is **not associative**, i.e. `(a + b) + c ≠ a + (b + c)` in general.
-A reduction such as `MPI_Allreduce` (and the GPU `atomicAdd`) therefore produces
-slightly different least-significant bits depending on the order in which the
-per-rank/per-thread partial sums happen to be combined — and that order varies
-with the number of ranks and with scheduling. The lecture material flags exactly
-this: `MPI_Reduce`/`MPI_Accumulate` "will likely produce different answers across
-different runs, even with the same input."
-
-In K-means the effect is tiny and bounded: the centroid coordinates differ only
-in their last float bits, so only points lying almost exactly on the boundary
-between two centroids can flip assignment. On the small blobs set we measured
-this directly — serial vs 2-rank MPI flips about 0.3% of labels, serial vs
-4/8-rank MPI about 0.08% — and in every case the aggregate inertia stays within a
-relative `~10⁻⁶`, so the clusterings are numerically equivalent and only
-genuinely ambiguous points differ. (We did not save the 3-million-point blob
-label files, so the exact flip count at the largest `K` is not reported here; the
-six-significant-figure inertia agreement is the quantitative evidence of
-equivalence.) Full bit-for-bit reproducibility would require a deterministic
-fixed-order reduction (for example, gathering all partial sums and summing them
-in a canonical order, at some performance cost); we judged the six-significant-
-figure agreement more than sufficient for a clustering task and did not impose
-that overhead.
-
-**Against ground truth.** The synthetic blobs carry planted labels, giving a
-direct oracle. On the large dataset, purity is **0.977** with **126 of 128
-clusters perfectly pure** (the two imperfect clusters are a k-means++
-local-minimum artefact where two planted blobs merged and one split — identical
-across all implementations). On MNIST digit labels, purity is ≈ 0.585 with
-`K=10` on raw pixels (Section 9).
-
-**Validation on the cluster.** The Atlas runs reproduce the local results: across
-serial and MPI at 1–16 ranks on Atlas, the final inertia is `8.624057e+08` or
-`8.624058e+08` (agreeing with the local serial/MPI runs and the GPU run to six
-significant figures, relative difference `~10⁻⁷`). Correctness is therefore
-preserved not only across parallelisation strategies but across platforms, all
-using Open MPI 4.1.x (4.1 locally, 4.1.6 on Atlas and Vanda), compiled
-independently on each machine.
-
-## 7. Parallel scaling and efficiency (local reference)
-
-This section characterises the scaling behaviour on a local workstation. These
-numbers are the **preliminary reference**; the required cluster figures are
-reported separately in Section 8 (Atlas / Vanda).
-
-> **Test platform (local):** AMD Ryzen 7 6800HS — **8 physical cores, 16 logical
-> threads** (2-way SMT) — with ~22 GB usable RAM, Open MPI 4.1, GCC 13, and a
-> single NVIDIA RTX 3050 Ti Laptop GPU (compute capability 8.6, 4 GB VRAM, 20
-> SMs). Each point is stored as a single-precision `float`. The distinction
-> between 8 physical cores and 16 threads is important for reading the scaling
-> below: ranks 1–8 each get a dedicated core, whereas 9–16 share cores via SMT.
-
-We measure **strong scaling**: the problem size is held fixed while the number of
-workers increases, so speedup shows how much faster a *fixed* job runs with more
-cores. (The complementary notion, **weak scaling**, grows the problem with the
-worker count — Gustafson's view — and is noted as an untested extension at the
-end of this section.) The dataset is a large synthetic set
-(`n=3,000,000`, `d=64`, `K=128`), run for a **fixed 32 iterations**
-(`--fixed-iter`) so that every configuration does identical work and timing is
-not confounded by convergence differences. Speedup `S(p) = T_serial / T(p)`;
-efficiency `E(p) = S(p)/p`.
-
-**Table 7.1 — MPI (CPU) strong scaling, local workstation.**
-
-| MPI processes | Time (s) | Speedup | Efficiency | Core usage |
-|---------------|----------|---------|------------|------------|
-| 1 (serial)    | 597.9    | 1.00    | 1.00       | 1 physical core |
-| 2             | 313.4    | 1.91    | 0.95       | dedicated cores |
-| 4             | 163.9    | 3.65    | 0.91       | dedicated cores |
-| 8             | 87.8     | 6.81    | 0.85       | all 8 physical cores |
-| 16            | 65.4     | 9.14    | 0.57       | 2 ranks/core (SMT) |
-
-The dataset is sized so the serial baseline runs ~10 minutes, keeping compute
-well above measurement noise and MPI start-up overhead.
-
-![Strong-scaling speedup (local)](../results/speedup.png){ width=60% }
-
-![Strong-scaling efficiency (local)](../results/efficiency.png){ width=60% }
-
-**Analysis.** Up to 8 ranks — the number of **physical** cores — efficiency stays
-high (≈ 0.85–0.95): the assignment work divides cleanly across dedicated cores
-and the `O(K·d)` reduction is small next to per-process compute. The gentle
-decline from 2→8 (0.95→0.85) reflects the growing relative cost of the
-per-iteration `MPI_Allreduce` (which moves `K·d = 128·64 = 8192` floats plus
-counts every iteration) and shared memory-bandwidth pressure as all cores become
-active. At 16 ranks efficiency drops sharply to ≈ 0.57, but this is **not** a
-limitation of the algorithm: the Ryzen 7 6800HS has only **8 physical cores**, so
-16 ranks place two ranks on each core via simultaneous multithreading (SMT).
-SMT shares one core's arithmetic units between two threads, which gives little
-extra throughput for this compute-bound inner loop — hence the fall-off. The
-meaningful local scaling range is therefore 1→8; the 16-rank point is included to
-show the expected SMT/over-subscription knee. Genuine scaling beyond 8 physical
-cores requires the multi-node clusters (Atlas / Vanda), tested in Section 8,
-where each rank can be placed on its own dedicated core.
-
-*Weak scaling (untested extension).* We measured strong scaling only. A weak-scaling
-study — growing `n` in proportion to the worker count so each worker keeps a
-constant local load — would be the Gustafson-style complement. Because the
-per-iteration communication is `O(K·d)` and independent of `n` (Section 2.2),
-weak scaling would be expected to hold efficiency even better than strong
-scaling, since the fixed reduction cost is amortised over a growing per-worker
-compute load; we did not run it as the project calls for strong-scaling figures.
-
-### 7.1 GPU performance (MPI + CUDA, local)
-
-On the single local GPU with the same problem and 32 fixed iterations:
-
-**Table 7.2 — Serial vs CPU-MPI vs single-GPU, local workstation.**
-
-| Configuration               | Time (s) | Speedup vs serial |
-|-----------------------------|----------|-------------------|
-| Serial (1 core)             | 597.9    | 1.0×              |
-| MPI, 8 ranks (8 cores)      | 87.8     | 6.8×              |
-| MPI, 16 ranks (8 cores+SMT) | 65.4     | 9.1×              |
-| MPI + CUDA, 1 GPU           | 35.2     | **17.0×**         |
-
-A single GPU beats even the fully-loaded CPU because the assignment step
-(`3e6 × 128 × 64` distance evaluations per iteration) is exactly the kind of
-regular, data-parallel arithmetic a GPU is built for. The design points from
-Section 5.3 — upload points once, stage centroids in shared memory, accumulate
-with `atomicAdd` — keep per-iteration overhead to the `O(K·d)` transfers.
-
-## 8. Runtime figures from Atlas / Vanda
-
-The required cluster runtime figures come from **Atlas**, which has large
-multi-core CPU nodes (80 cores per node) and uses the PBS scheduler. The MPI
-(CPU) strong-scaling study below was run there, with ranks placed on dedicated
-physical cores. Because of queue contention on this shared cluster, the run that
-reached the highest core count used two nodes (16 cores on each); this means the
-per-iteration `MPI_Allreduce` crosses the node interconnect at 32 ranks, which
-makes the sustained efficiency all the more notable. (Scheduling constraints are
-discussed in Section 11.)
-
-Runs were submitted with `pbs/atlas_sweep.pbs`, which executes the whole 1→32
-sweep in one job and writes `results/scaling_atlas.csv`; see README.
-
-### 8.1 Cluster and environment
-
-| Item | Atlas (CPU) |
-|------|-------------|
-| Cores per node | 80 physical cores |
-| Scheduler | PBS Pro (`qsub`) |
-| Compiler | GCC 13.2.0 |
-| MPI implementation | Open MPI 4.1.6 (`OpenMPI/4.1.6-GCC-13.2.0`) |
-| Dataset | 3,000,000 points × 64 dims, K = 128, 32 fixed iterations |
-| Run placement | 2 nodes × 16 cores, one rank per dedicated core |
-
-> The MPI + CUDA (GPU) study was run on **Vanda** (Vanda has GPU nodes; Atlas is
-> CPU-only). The multi-GPU (1→2 A40) scaling figures are reported in Section 8.3;
-> the local single-GPU result in Section 7.1 additionally demonstrates the CUDA
-> implementation on consumer hardware.
-
-### 8.2 MPI (CPU) strong scaling on Atlas
-
-Measured on Atlas in a two-node allocation of 16 cores per node (32 slots total),
-same dataset and 32 fixed iterations as the local study. Because the ranks fill
-the first node before spilling onto the second, the 1–16-rank rows all run
-*within a single node* and only the 32-rank row spans both nodes (see the
-analysis below). Speedup `S(p) = T_serial / T(p)`; efficiency `E(p) = S(p)/p`,
-baseline = Atlas serial (404.6 s).
-
-**Table 8.1 — MPI (CPU) strong scaling, Atlas (2-node allocation, 16 cores/node; 1–16 ranks on one node, 32 ranks across two).**
-
-| MPI processes | Time (s) | Speedup | Efficiency |
-|---------------|----------|---------|------------|
-| 1 (serial)    | 404.6    | 1.00    | 1.00       |
-| 2             | 202.4    | 2.00    | 1.00       |
-| 4             | 100.9    | 4.01    | 1.00       |
-| 8             | 50.5     | 8.01    | 1.00       |
-| 16            | 25.3     | 15.97   | 1.00       |
-| 32            | 12.9     | 31.32   | 0.98       |
-
-![Strong-scaling speedup, Atlas](../results/speedup_atlas_2node.png){ width=60% }
-
-![Strong-scaling efficiency, Atlas](../results/efficiency_atlas_2node.png){ width=60% }
-
-**Analysis.** On Atlas the implementation scales almost ideally: efficiency stays
-at ≈ 1.00 up to 16 ranks and is still **0.98 at 32 ranks**, for a 31.3× speedup.
-The measured speedup line is visually indistinguishable from the ideal-linear
-line across the whole range. Inertia agrees to six significant figures at every
-process count (`8.624057e+08`/`8.624058e+08`), confirming correctness is
-preserved as the job is parallelised.
-
-Two points make this result strong. First, up to 16 ranks the job runs within a
-single node, so the `MPI_Allreduce` uses fast shared memory; the near-unity
-efficiency there shows the per-rank work divides cleanly. Second — and more
-telling — the 32-rank point spans **two nodes**, so the reduction now crosses the
-network interconnect, yet efficiency only slips from 1.00 to 0.98. This is a
-direct consequence of the design choice in Section 2.2: the reduction moves just
-`K·d = 128·64 = 8192` floats per iteration regardless of `n`, so even inter-node
-communication is negligible next to the `O(n·K·d)` assignment work. The algorithm
-is firmly compute-bound, and the parallelisation adds almost no overhead even
-across nodes.
-
-The contrast with the local workstation (Section 7) completes the picture.
-There, efficiency collapsed to ≈ 0.57 at 16 ranks because the laptop has only 8
-physical cores, so 16 ranks contended two-to-a-core via SMT. On Atlas each rank
-runs on its own physical core and efficiency stays near 1.0 to 32 ranks. The
-laptop fall-off was therefore a property of the test hardware, not of the
-algorithm: given dedicated cores, the method scales linearly. Higher counts
-still (64, up to the per-job limit of 96 cores) are a natural extension but were
-bounded by scheduler availability on this shared cluster (Section 11).
-
-### 8.3 MPI + CUDA (GPU) scaling on Vanda
-
-The MPI + CUDA implementation was built and run on **Vanda**, on a node with two
-**NVIDIA A40** GPUs (Ampere, compute capability 8.6), using the same dataset and
-32 fixed iterations as every other measurement. The build used
-`GCC 13.2.0 + OpenMPI 4.1.6 + CUDA 12.4` (see `pbs/vanda_cuda.pbs`). One MPI rank
-is bound to one GPU (`cudaSetDevice(rank % deviceCount)`), so the 1- and 2-GPU
-runs use an identical code path and differ only in rank count.
-
-**Table 8.2 — MPI + CUDA GPU strong scaling, Vanda (NVIDIA A40).**
-
-| GPUs | Time (s) | Speedup vs 1 GPU | Efficiency | Speedup vs Atlas serial |
-|------|----------|------------------|------------|-------------------------|
-| 1    | 8.62     | 1.00             | 1.00       | 46.9×                   |
-| 2    | 4.31     | 2.00             | **1.00**   | **93.9×**               |
-
-![Vanda multi-GPU strong scaling: 2 A40s halve the runtime for a 2.00× speedup at 1.00 efficiency. Both GPUs are on one node, so the per-iteration `MPI_Allreduce` stays on-device/on-node.](../results/vanda_gpu_scaling.png){ width=92% }
-
-Two GPUs run the benchmark in **4.31 s versus 8.62 s on one** — an exactly
-**2.00× speedup, i.e. 1.00 parallel efficiency**. The final inertia is
-`8.624058e+08`, agreeing with the 1-GPU result and every CPU run to six
-significant figures (relative difference `~10⁻⁷`), so doubling the GPU count
-preserves the clustering. Both
-A40s sit on a single node, so the per-iteration `MPI_Allreduce` that combines the
-two GPUs' partial sums stays within the node; the near-ideal efficiency confirms
-that this cross-GPU reduction — again just `K·d = 8192` floats — is negligible
-next to the halved `O(n·K·d)` assignment work. At ≈ 0.13 s per iteration, two
-A40s are roughly **94× faster than a single Atlas CPU core** and about 3× faster
-than all 32 Atlas CPU cores combined (12.9 s, Section 8.2).
-
-This directly validates the `O(K·d)` scaling argument on the GPU path: the same
-property that kept the Atlas CPU runs efficient across nodes keeps the GPU runs
-efficient across devices. Scaling beyond two GPUs (4 GPUs across two nodes, where
-the reduction would cross the node interconnect) is the natural next step and
-would be expected to hold until the per-GPU work shrinks enough that even the
-tiny inter-node reduction becomes visible; it was not run because a 4-GPU / 2-node
-allocation did not free up within the project window (Section 11.2).
-
-### 8.4 Cross-platform summary
-
-Best measured runtime for each implementation on the same problem
-(`n = 3,000,000`, `d = 64`, `K = 128`, 32 fixed iterations):
-
-**Table 8.3 — Best runtime per implementation and platform.**
-
-| Implementation | Platform | Best config | Time (s) | Speedup vs serial |
-|----------------|----------|-------------|----------|-------------------|
-| Serial         | Atlas    | 1 core      | 404.6    | 1.0×              |
-| MPI (CPU)      | Laptop   | 16 ranks / 8 cores | 65.4 | 9.1×            |
-| MPI (CPU)      | Atlas    | 32 ranks (2 nodes × 16) | 12.9 | 31.3×       |
-| MPI + CUDA     | Laptop   | 1 GPU (RTX 3050 Ti) | 35.2 | 11.5×           |
-| MPI + CUDA     | Vanda    | 1 GPU (A40)         | 8.62 | 46.9×           |
-| MPI + CUDA     | Vanda    | 2 GPUs (A40)        | 4.31 | **93.9×**       |
-
-![Best runtime for each implementation and platform (log scale; speedup vs the Atlas serial core annotated). Two A40s (4.31 s) are the fastest option, well ahead of all 32 Atlas CPU cores (12.9 s).](../results/cross_platform_runtime.png){ width=75% }
-
-Three takeaways. First, with dedicated cores the CPU implementation scales
-linearly (Atlas, 31.3× on 32 ranks at 0.98 efficiency — even across two nodes)
-where the SMT-limited laptop could not (9.1× on 16 ranks over 8 cores). Second,
-the GPU is the fastest option by a wide margin and scales cleanly: a single
-datacenter A40 (46.9×) already beats all 32 Atlas CPU cores (31.3×), and two
-A40s (93.9×, 2.00× over one GPU at 1.00 efficiency) are about 3× faster still —
-even a modest laptop GPU (11.5×) is competitive with many CPU cores, underlining
-why the distance-bound assignment step is the right target for GPU offload.
-Third, every configuration converges to the same inertia
-(`8.624057e+08`/`8.624058e+08`, agreeing to six significant figures), so the ~94×
-range in runtime is pure performance, with correctness preserved throughout.
-
-## 9. Analysis and discussion
-
-The measured results (Sections 7–8) line up closely with what the design in
-Sections 1–5 predicts. This section steps back from the individual numbers to
-draw out *why* the behaviour looks the way it does, and what it says about the
-parallelisation.
-
-### 9.1 The algorithm is compute-bound, and that is why it scales
-
-The single most important observation across every platform is that K-means, as
-parallelised here, is **compute-bound, not communication-bound**. The design
-decision in Section 2.2 — reduce the `O(K·d)` partial sums rather than the
-`O(n)` assignments — fixes the per-iteration communication at `K·d = 8192`
-floats regardless of how large the dataset is or how many workers share it. The
-assignment work, by contrast, is `O(n·K·d)` and dominates.
-
-The Atlas numbers make this concrete. Efficiency holds at ≈ 1.00 through 16 ranks
-*within a node* and is still **0.98 at 32 ranks across two nodes**, where the
-reduction now crosses the network interconnect. A communication-bound algorithm
-would show a clear penalty the moment the reduction left shared memory; here the
-inter-node step costs almost nothing because it is amortised over a large block
-of local compute. This is Amdahl's law (Section 1.4) working in our favour: the
-serial fraction `S` — the reduction plus its synchronisation — is tiny, so the
-achievable speedup stays close to linear.
-
-### 9.2 Hardware, not the algorithm, set the ceilings we hit
-
-Two apparent "slow-downs" in the data are properties of the test hardware, not of
-the method:
-
-- **The laptop's 0.57 efficiency at 16 ranks** is simultaneous multithreading, not
-  an algorithmic limit. The Ryzen 7 6800HS has 8 physical cores; ranks 9–16 share
-  arithmetic units two-to-a-core, which gives little extra throughput for a
-  compute-bound inner loop. Atlas, giving each rank a dedicated physical core,
-  stays near 1.00 efficiency over the same range — the clean control that proves
-  the point. The lesson is a general one from the lecture material: speedup is
-  bounded by the number of *physical* execution units, and oversubscription past
-  them buys little for arithmetic-heavy work.
-
-- **The single-GPU result on Vanda was insensitive to host CPU count.** We ran the
-  MPI+CUDA build with `ncpus=8` and again with a single host core, and the cluster
-  time was unchanged at ≈ **8.62 s** (versus 8.63 s earlier). This is expected:
-  with one MPI rank driving one GPU, the assignment arithmetic lives on the A40,
-  so adding host cores cannot help — the host only launches kernels and runs the
-  `O(K·d)` reduction. It is a useful negative result because it points at the
-  *right* lever for more GPU performance: more GPUs (more ranks, each bound to a
-  device), not more host cores. The 2-GPU run (Section 8.3) confirms this
-  directly — doubling the *GPUs* halved the runtime (2.00×), the scaling that
-  doubling the *host cores* could not deliver.
-
-### 9.3 Why the GPU wins so decisively
-
-A single datacenter A40 (8.62 s, 46.9× over an Atlas core) beat **all 32 Atlas
-CPU cores combined** (12.9 s), and two A40s (4.31 s, 93.9×) widened the gap to
-roughly 3×. This is the expected outcome for a distance-bound kernel. The assignment step is regular, branch-light floating-point arithmetic
-over a large array — precisely the SIMD-style workload a GPU is built for
-(Section 2.3). The Section 5.3 design choices are what let the GPU approach its
-potential: uploading the points once keeps the slow PCIe link out of the inner
-loop, staging centroids in shared memory turns `K` global reads per thread into
-one, and bounding `atomicAdd` contention by `K` (not `n`) keeps the reduction
-cheap. Without those, the kernel would be throttled by memory movement long
-before it ran out of arithmetic throughput.
-
-![Cost of a single Lloyd iteration: 12.6 s on one serial core collapses to 0.40 s across 32 Atlas cores, 0.27 s on one A40 GPU, and 0.13 s on two A40s.](../results/per_iter_time.png){ width=60% }
-
-### 9.4 Correctness held everywhere, and the small differences are understood
-
-Across three implementations, three platforms (laptop, Atlas, Vanda) all running
-Open MPI 4.1.x, and process counts from 1 to 32, the final inertia agreed to
-**six significant figures** (`8.624057e+08`/`8.624058e+08`, relative difference
-`~10⁻⁷`), and the repeated Vanda run reproduced its value. The small label
-differences on the large-`K` case are not a defect but the expected consequence
-of floating-point non-associativity (Section 6): different reduction orders
-combine the same partial sums in a different sequence, flipping only the handful
-of points that sit almost exactly on a cluster boundary (measured at `0.1–0.3%`
-on the small blobs set; not separately counted for the 3-million-point run, whose
-label files were not retained). That the aggregate inertia is nonetheless stable
-to six significant figures is the strongest statement of correctness available
-for a reduction-based parallel algorithm.
-
-### 9.5 What the results do and do not establish
-
-The strong-scaling evidence is solid: given dedicated cores, the CPU
-implementation scales near-linearly to 32 ranks even across nodes; the GPU path
-is correct and fast; and the GPU path now also has a direct multi-device data
-point — 2 A40s at 2.00× speedup and 1.00 efficiency (Section 8.3) — which
-confirms the `O(K·d)` scaling argument holds across GPUs, not just across CPU
-nodes. The one thing the experiments still do **not** establish — because of the
-resource constraints in Section 11 — is the shape of the curve at higher counts:
-single-node CPU beyond 32 cores (toward the 96-core per-job limit) and GPU beyond
-2 devices (4 GPUs across two nodes, where the reduction would cross the
-interconnect). The `O(K·d)` argument predicts both would continue to scale well,
-and the measured 2-node Atlas (0.98 at 32 ranks) and 2-GPU Vanda (1.00) results
-are strong direct support, but the higher counts themselves were not measured and
-so remain an expectation rather than a result.
-
-## 10. Conclusions about the data (MNIST)
-
-The required "conclusions about real data" are drawn from MNIST, the real dataset
-used in this project (70,000 handwritten-digit images, each a 784-dimensional
-raw-pixel vector, with the true digit 0–9 available as a ground-truth label).
-
-Clustering raw-pixel MNIST with `K=10` reaches ≈ 0.585 purity. The per-cluster
-majority classes show *which* digits are separable in raw pixel space:
-
-- Clean clusters: **0** (majority fraction ≈ 0.94), **2** (≈ 0.91), **6** (≈ 0.86).
-- Confused: **4/7/9** and **3/5/8** share pixel-level structure (loops and strokes
-  in similar positions) and split or merge across clusters.
-
-Conclusion: Euclidean K-means on raw pixels captures gross shape but cannot
-separate digits whose ink overlaps heavily. This matches the known result that
-MNIST benefits from a feature transform (PCA, learned embeddings) before
-clustering — a natural extension, but outside this project's parallelisation
-focus.
-
-## 11. Limitations
-
-The implementation and its validation are complete, but the *scope of the
-cluster experiments* was constrained by shared-resource availability rather than
-by the code. These constraints are documented here for transparency; none of
-them affects the correctness results in Section 6.
-
-### 11.1 Atlas (CPU): scheduling bounded the core counts
-
-Atlas is a heavily shared cluster, and the `parallel` queue imposes per-job
-limits (maximum 96 cores per job, minimum 12 cores per chunk, maximum 8 running
-jobs). The binding constraint in practice, however, was not these limits but
-live availability: a request for a large block of cores on a single node could
-not be satisfied for an extended period.
-
-Concretely, requests for 80 or even 32 cores on one node (`select=1`) remained
-queued for up to two days because no single node ever had that many cores free
-at once (the scheduler reported, e.g., 80 requested vs ~50 available on the
-best-placed node). Small, easy-to-place requests scheduled almost immediately.
-We therefore have two Atlas datasets: a **single-node** sweep that scheduled
-reliably up to **16 ranks** (`results/scaling_atlas.csv`: 16 ranks → 15.73×
-speedup, 0.983 efficiency — near-ideal), and the **two-node, 32-slot** allocation
-reported in Section 8.2, which extended the curve to 32 ranks (15.97× at 16,
-31.32× at 32). Single-node counts above 16 were valid requests but not obtainable
-within the project window. The two-node allocation is not a flaw but it does
-change the 32-rank measurement, since the reduction phase then crosses the node
-interconnect rather than shared memory; we therefore describe the 32-rank point
-as a two-node result rather than a continuation of the clean single-node curve.
-
-### 11.2 Vanda (GPU): multi-GPU scaling bounded at two devices
-
-The MPI + CUDA implementation was built and run on Vanda across **one and two
-NVIDIA A40 GPUs** (Section 8.3): both counts reproduced the CPU inertia to six
-significant figures, and two GPUs scaled at 2.00× (1.00 efficiency) over one. The
-toolchain (`GCC 13.2.0`, `OpenMPI 4.1.6`, `CUDA 12.4`) worked as expected. The
-remaining bound is on **scaling beyond two GPUs**:
-
-1. **Two GPUs were obtained on a single node**, which gives a clean intra-node
-   measurement but means the 2-GPU reduction never leaves the node. A 4-GPU run
-   spanning two nodes — which would exercise the inter-node interconnect on the
-   GPU path, the GPU analogue of the 32-rank Atlas run — needs a larger GPU
-   allocation.
-2. **GPU nodes are heavily contended.** Securing an allocation with four GPUs, or
-   two 2-GPU nodes at once, requires the scheduler to place a larger GPU request
-   on a busy partition; this did not free up within the project window. (Vanda's
-   login node is also a GPU-less VM, so all building and running must happen on a
-   scheduled compute node.)
-
-The 1- and 2-GPU results are therefore complete, validated data points that
-establish near-ideal GPU scaling; only the 4-GPU / 2-node extension is
-outstanding. The code is ready for it via `pbs/vanda_cuda.pbs` — with one rank
-bound to one GPU (`qsub -l select=2:ncpus=2:ngpus=2:mpiprocs=2 -v NP=4`), it
-reuses the same `MPI_Allreduce` used everywhere else.
-
-### 11.3 Summary
-
-The project's required deliverables — serial, MPI, and MPI+CUDA implementations;
-correctness validation; CPU scaling on a cluster (Atlas, 1→32 ranks); and
-multi-GPU CUDA scaling on Vanda (1→2 A40s) — are all satisfied. The two items
-bounded by resource availability are higher single-node CPU core counts (beyond
-32, toward the 96-core limit) and GPU scaling beyond two devices (4 GPUs across
-two nodes); both are immediately runnable with the included PBS scripts should
-cluster time become available.
-
-## 12. Conclusion
-
-We implemented Lloyd's K-means three ways — a serial baseline, a distributed-
-memory MPI version, and an MPI+CUDA version — around a single data-parallel
-decomposition over points, with the centroid update expressed as a global
-reduction phase (three `MPI_Allreduce` collectives of size `O(K·d)` per
-iteration). The reduction volume is independent of `n`, which is what lets the
-method stay compute-bound and scale well.
-
-The measurements bear this out on a 3-million-point, 64-dimensional, `K=128`
-benchmark at a fixed 32 iterations. On Atlas the MPI version scales near-linearly
-to 32 ranks (31.3×, 0.98 efficiency, even across two nodes); on Vanda the
-MPI+CUDA version runs a single A40 in 8.62 s and two A40s in 4.31 s (2.00×, 1.00
-efficiency), the fastest configuration measured and about 94× an Atlas serial
-core. Correctness is preserved throughout: serial and MPI are bit-identical at
-one rank, MNIST clustering is 100% label-identical between serial and 8-rank MPI,
-and the benchmark inertia agrees to six significant figures across every
-implementation, platform and worker count, with the only differences being the
-expected last-bit effects of non-associative floating-point reduction. On real
-MNIST data, raw-pixel K-means reaches 0.585 purity, cleanly separating visually
-distinct digits (0, 2, 6) while merging stroke-similar ones (4/7/9, 3/5/8).
-
-The work left undone is bounded by shared-cluster availability rather than by the
-code: single-node CPU runs beyond 32 cores and GPU scaling beyond two devices
-(Section 11). Both are immediately runnable with the included scripts.
-
-## 13. AI usage declaration
-
-An AI coding assistant (Kiro, built on a large language model) was used as a
-support tool throughout this project: for scaffolding the repository structure;
-drafting and debugging the serial, MPI and MPI+CUDA C++ sources and the
-supporting Python/Bash scripts; drafting and editing portions of this report and
-the README; and preparing the diagrams, illustrations and figure-generation
-code. It was also used to diagnose build and environment issues on the clusters
-(for example the `nvcc` MPI-flag problem and the PBS `ebenv` setup) and to run
-the local validation and scaling experiments.
-
-The project team remains responsible for the design decisions, for running the
-cluster experiments on Atlas and Vanda, for interpreting the results, and for
-ensuring the submitted claims match the measured outputs. Where numbers in this
-report could be re-checked from the code and data they were (serial-vs-MPI
-agreement, MNIST purity and the per-cluster majority digits, the local and
-cluster scaling tables); results that depend on artefacts we did not retain (the
-exact label-flip count on the three-million-point blob set) are reported as such
-rather than overstated. The team takes responsibility for the correctness and
-integrity of the final submission, including clearly identifying the limitations
-and the experiments that were not completed (Section 11).
-
-## 14. References
-
-1. S. Lloyd, "Least squares quantization in PCM," *IEEE Transactions on
-   Information Theory*, vol. 28, no. 2, pp. 129–137, 1982.
-2. D. Arthur and S. Vassilvitskii, "k-means++: The advantages of careful
-   seeding," in *Proc. 18th ACM-SIAM Symposium on Discrete Algorithms (SODA)*,
-   pp. 1027–1035, 2007.
-3. Y. LeCun, C. Cortes and C. J. C. Burges, "The MNIST database of handwritten
-   digits," http://yann.lecun.com/exdb/mnist/ (accessed October 2026).
-4. Message Passing Interface Forum, *MPI: A Message-Passing Interface Standard,
-   Version 4.0*, 2021. https://www.mpi-forum.org/docs/
-5. NVIDIA Corporation, *CUDA C++ Programming Guide*, v12.4, 2024.
-   https://docs.nvidia.com/cuda/cuda-c-programming-guide/
-6. Project source code and scripts:
-   https://github.com/AmritSatpathy/parallelKmean
-
-## Appendix: reproducing results
-
-See `README.md`. In short: `make all`, `bash scripts/fetch_mnist.sh` (or
-`./bin/gen_blobs …` for the synthetic set), then the run / validate / scaling
-commands. Every `RESULT` line and label file referenced above is produced by
-those commands.
+To keep the submission small, dataset CSVs are excluded. The README provides MNIST download and checksum-verification commands, plus synthetic-data generation instructions. Public MNIST files match the project inputs; retrieved Atlas and Vanda synthetic copies are byte-identical. Data checksums and HPC source snapshots are retained. Record dataset hashes and distinct experiment filenames in future runs. Workload and measurement-batch labels support valid comparisons across the completed project archive: the 100-iteration Atlas values must not replace a 32-iteration baseline. Local runs retain their platform and configuration labels, while completed HPC records retain their job identifiers.

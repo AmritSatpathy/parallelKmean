@@ -1,0 +1,185 @@
+{
+  "retrieved_date": "2026-11-12",
+  "dataset_sources": {
+    "atlas": {
+      "remote_path": "~/parallelKmean/data/blobs_big.csv",
+      "bytes": 1757795622,
+      "sha256": "4c420e3b2e6b442e807a658dd8d0c3d9b1cfb685e51c8868863acc51e8d3de2b",
+      "rows": 3000000,
+      "columns": 65,
+      "invalid_width_rows": 0
+    },
+    "vanda": {
+      "remote_path": "~/parallelKmean/data/blobs_big.csv",
+      "bytes": 1757795622,
+      "sha256": "4c420e3b2e6b442e807a658dd8d0c3d9b1cfb685e51c8868863acc51e8d3de2b",
+      "rows": 3000000,
+      "columns": 65,
+      "invalid_width_rows": 0
+    }
+  },
+  "datasets_byte_identical": true,
+  "source_and_makefile_match_local": true,
+  "snapshots": [
+    {
+      "host": "atlas",
+      "remote_relative_path": "src/common.hpp",
+      "snapshot_path": "pbs/hpc_snapshots/atlas/src/common.hpp",
+      "sha256": "44b1e3a7ca287ffa16b16890da8a053be98459b15661d18e55d8bf46e92769bd"
+    },
+    {
+      "host": "atlas",
+      "remote_relative_path": "src/kmeans_mpi.cpp",
+      "snapshot_path": "pbs/hpc_snapshots/atlas/src/kmeans_mpi.cpp",
+      "sha256": "6ce50a79f5afa5613871c191394787f569703a0f84a7e43f990598d8a11d7342"
+    },
+    {
+      "host": "atlas",
+      "remote_relative_path": "src/kmeans_mpi_cuda.cu",
+      "snapshot_path": "pbs/hpc_snapshots/atlas/src/kmeans_mpi_cuda.cu",
+      "sha256": "2d34f2c89e4a05c5327ec8f334441c7385b3f7aded9a6fb1eaaea0a9afbc0295"
+    },
+    {
+      "host": "atlas",
+      "remote_relative_path": "src/kmeans_serial.cpp",
+      "snapshot_path": "pbs/hpc_snapshots/atlas/src/kmeans_serial.cpp",
+      "sha256": "0931a4731d40dab1a0b48efb26b3702cc9aefaa739dc579b3d080dd63b0f220e"
+    },
+    {
+      "host": "atlas",
+      "remote_relative_path": "scripts/compare_labels.py",
+      "snapshot_path": "pbs/hpc_snapshots/atlas/scripts/compare_labels.py",
+      "sha256": "a8cff4958ab903c171f648e95bcc6c7bcac1cfd3541e26beb4c4c51c34a8e051"
+    },
+    {
+      "host": "atlas",
+      "remote_relative_path": "scripts/fetch_mnist.sh",
+      "snapshot_path": "pbs/hpc_snapshots/atlas/scripts/fetch_mnist.sh",
+      "sha256": "4e0991978c25e6d1d9d18c3cd9c932dacf3d6fe97297f8a1ea841aada96b3d3c"
+    },
+    {
+      "host": "atlas",
+      "remote_relative_path": "scripts/gen_blobs.cpp",
+      "snapshot_path": "pbs/hpc_snapshots/atlas/scripts/gen_blobs.cpp",
+      "sha256": "3d4e38254b54b02808d527b064cf0c6a643d808171111a924d331cdd48443ee0"
+    },
+    {
+      "host": "atlas",
+      "remote_relative_path": "scripts/plot_scaling.py",
+      "snapshot_path": "pbs/hpc_snapshots/atlas/scripts/plot_scaling.py",
+      "sha256": "ee969e765792d0ebc1055ff85ccb1db46ec8087c264ec9cc42ae18511c06d288"
+    },
+    {
+      "host": "atlas",
+      "remote_relative_path": "scripts/run_scaling.sh",
+      "snapshot_path": "pbs/hpc_snapshots/atlas/scripts/run_scaling.sh",
+      "sha256": "154c81364910e63ae2e0ce040a4dc171191299fe50f3e5d2e13b72ac20d6566e"
+    },
+    {
+      "host": "atlas",
+      "remote_relative_path": "scripts/validate.py",
+      "snapshot_path": "pbs/hpc_snapshots/atlas/scripts/validate.py",
+      "sha256": "418571de781e5e9d0a43056be0ce3ed1e8d309d1b51312bc0928e2a195270816"
+    },
+    {
+      "host": "atlas",
+      "remote_relative_path": "pbs/atlas_sweep.pbs",
+      "snapshot_path": "pbs/hpc_snapshots/atlas/pbs/atlas_sweep.pbs",
+      "sha256": "74de3fbeb767c62da7ef8683d2cb3f270c9f8414e9c5ad0f47b5497b491a0f06"
+    },
+    {
+      "host": "atlas",
+      "remote_relative_path": "pbs/vanda_cuda.pbs",
+      "snapshot_path": "pbs/hpc_snapshots/atlas/pbs/vanda_cuda.pbs",
+      "sha256": "8beee5eff671781cc05f17d657a5f94d818ab538a9cd414eb8c64abf64158b21"
+    },
+    {
+      "host": "atlas",
+      "remote_relative_path": "Makefile",
+      "snapshot_path": "pbs/hpc_snapshots/atlas/Makefile",
+      "sha256": "905f152257c8087319c0ac78810d5ca228b89ba6c07480ca9378f962f3be5366"
+    },
+    {
+      "host": "vanda",
+      "remote_relative_path": "src/common.hpp",
+      "snapshot_path": "pbs/hpc_snapshots/vanda/src/common.hpp",
+      "sha256": "44b1e3a7ca287ffa16b16890da8a053be98459b15661d18e55d8bf46e92769bd"
+    },
+    {
+      "host": "vanda",
+      "remote_relative_path": "src/kmeans_mpi.cpp",
+      "snapshot_path": "pbs/hpc_snapshots/vanda/src/kmeans_mpi.cpp",
+      "sha256": "6ce50a79f5afa5613871c191394787f569703a0f84a7e43f990598d8a11d7342"
+    },
+    {
+      "host": "vanda",
+      "remote_relative_path": "src/kmeans_mpi_cuda.cu",
+      "snapshot_path": "pbs/hpc_snapshots/vanda/src/kmeans_mpi_cuda.cu",
+      "sha256": "2d34f2c89e4a05c5327ec8f334441c7385b3f7aded9a6fb1eaaea0a9afbc0295"
+    },
+    {
+      "host": "vanda",
+      "remote_relative_path": "src/kmeans_serial.cpp",
+      "snapshot_path": "pbs/hpc_snapshots/vanda/src/kmeans_serial.cpp",
+      "sha256": "0931a4731d40dab1a0b48efb26b3702cc9aefaa739dc579b3d080dd63b0f220e"
+    },
+    {
+      "host": "vanda",
+      "remote_relative_path": "scripts/compare_labels.py",
+      "snapshot_path": "pbs/hpc_snapshots/vanda/scripts/compare_labels.py",
+      "sha256": "a8cff4958ab903c171f648e95bcc6c7bcac1cfd3541e26beb4c4c51c34a8e051"
+    },
+    {
+      "host": "vanda",
+      "remote_relative_path": "scripts/fetch_mnist.sh",
+      "snapshot_path": "pbs/hpc_snapshots/vanda/scripts/fetch_mnist.sh",
+      "sha256": "4e0991978c25e6d1d9d18c3cd9c932dacf3d6fe97297f8a1ea841aada96b3d3c"
+    },
+    {
+      "host": "vanda",
+      "remote_relative_path": "scripts/gen_blobs.cpp",
+      "snapshot_path": "pbs/hpc_snapshots/vanda/scripts/gen_blobs.cpp",
+      "sha256": "3d4e38254b54b02808d527b064cf0c6a643d808171111a924d331cdd48443ee0"
+    },
+    {
+      "host": "vanda",
+      "remote_relative_path": "scripts/plot_scaling.py",
+      "snapshot_path": "pbs/hpc_snapshots/vanda/scripts/plot_scaling.py",
+      "sha256": "ee969e765792d0ebc1055ff85ccb1db46ec8087c264ec9cc42ae18511c06d288"
+    },
+    {
+      "host": "vanda",
+      "remote_relative_path": "scripts/run_scaling.sh",
+      "snapshot_path": "pbs/hpc_snapshots/vanda/scripts/run_scaling.sh",
+      "sha256": "154c81364910e63ae2e0ce040a4dc171191299fe50f3e5d2e13b72ac20d6566e"
+    },
+    {
+      "host": "vanda",
+      "remote_relative_path": "scripts/validate.py",
+      "snapshot_path": "pbs/hpc_snapshots/vanda/scripts/validate.py",
+      "sha256": "418571de781e5e9d0a43056be0ce3ed1e8d309d1b51312bc0928e2a195270816"
+    },
+    {
+      "host": "vanda",
+      "remote_relative_path": "pbs/atlas_sweep.pbs",
+      "snapshot_path": "pbs/hpc_snapshots/vanda/pbs/atlas_sweep.pbs",
+      "sha256": "c312c1832a44a06807f6ea1be28636ee2f2f160adf09b96203bd1eca9675ed82"
+    },
+    {
+      "host": "vanda",
+      "remote_relative_path": "pbs/vanda_cuda.pbs",
+      "snapshot_path": "pbs/hpc_snapshots/vanda/pbs/vanda_cuda.pbs",
+      "sha256": "6c4e764e145405a48dcf63bf16e46dc202b6826870c6f56bee3e27dae9d96f13"
+    },
+    {
+      "host": "vanda",
+      "remote_relative_path": "Makefile",
+      "snapshot_path": "pbs/hpc_snapshots/vanda/Makefile",
+      "sha256": "905f152257c8087319c0ac78810d5ca228b89ba6c07480ca9378f962f3be5366"
+    }
+  ],
+  "qualification": "Checksums describe the files downloaded on 12 November; historical jobs did not record contemporaneous input hashes.",
+  "dataset_in_submission_zip": false,
+  "dataset_access": "MNIST: verified public download via scripts/fetch_mnist.sh; synthetic: generation instructions in README, no public URL. Original local datasets retained.",
+  "dataset_path": "data/blobs_big.csv"
+}

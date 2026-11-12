@@ -4,25 +4,25 @@
 # One MPI rank is bound to one GPU (rank % deviceCount in the code). Request as
 # many GPUs as ranks. Submit once per GPU count, e.g.:
 #
-#   qsub -l select=1:ncpus=1:ngpus=1:mpiprocs=1 -v NP=1 pbs/vanda_cuda.pbs
-#   qsub -l select=1:ncpus=2:ngpus=2:mpiprocs=2 -v NP=2 pbs/vanda_cuda.pbs
-#   qsub -l select=2:ncpus=2:ngpus=2:mpiprocs=2 -v NP=4 pbs/vanda_cuda.pbs   # 4 GPUs / 2 nodes
+#   qsub -l select=1:ncpus=36:ngpus=1:mpiprocs=1:mem=240gb -v NP=1 pbs/vanda_cuda.pbs
+#   qsub -l select=1:ncpus=72:ngpus=2:mpiprocs=2:mem=480gb -v NP=2 pbs/vanda_cuda.pbs
+# Single-node one/two-GPU configurations are documented in README.md.
 #
 # IMPORTANT: Vanda login nodes are a VM — build on a compute node, not the login
 # node. This job script compiles inside the job (which runs on a compute node),
 # so `make` here is safe. For interactive builds use:
-#   qsub -I -l select=1:ncpus=1:ngpus=1 -l walltime=00:10:00
+#   qsub -I -l select=1:ncpus=36:ngpus=1:mem=240gb -l walltime=00:10:00
 #
 # EDIT the module names and CUDA_ARCH to match Vanda's GPUs.
 #PBS -N kmeans_cuda
-#PBS -l select=1:ncpus=1:ngpus=1:mpiprocs=1   # overridden by -l on the qsub line
+#PBS -l select=1:ncpus=36:ngpus=1:mpiprocs=1:mem=240gb
 #PBS -l walltime=00:30:00
 #PBS -j oe
 #PBS -o pbs/logs/
 
-set -eo pipefail          # note: NOT -u — /app1/ebenv references unset vars
+set -eo pipefail
 cd "$PBS_O_WORKDIR"
-mkdir -p pbs/logs results
+mkdir -p pbs/logs results data
 
 # --- environment + modules (Vanda) ---
 # ebenv / module system reference vars that may be unset in a clean batch shell.
@@ -32,7 +32,7 @@ module load GCC/13.2.0 OpenMPI/4.1.6-GCC-13.2.0 CUDA/12.4.0
 
 # Vanda GPUs are NVIDIA A40 (Ampere, compute capability 8.6) -> sm_86.
 ARCH="${CUDA_ARCH:-sm_86}"
-make cuda gen CUDA_ARCH="$ARCH"
+make cuda gen CUDA_ARCH="$ARCH" CXX=g++ MPICXX=mpicxx NVCC=nvcc
 
 CSV="${CSV:-data/blobs_big.csv}"
 K="${K:-128}"
@@ -40,7 +40,11 @@ SEED="${SEED:-42}"
 MAXIT="${MAXIT:-32}"
 NP="${NP:-1}"                           # number of ranks = number of GPUs
 if [ ! -s "$CSV" ]; then
-    ./bin/gen_blobs --n 3000000 --dims 64 --k "$K" --sep 25 --out "$CSV"
+    if [ "$CSV" != "data/blobs_big.csv" ]; then
+        echo "Missing input dataset: $CSV (refusing to substitute synthetic data)" >&2
+        exit 1
+    fi
+    ./bin/gen_blobs --n 3000000 --dims 64 --k "$K" --spread 1 --sep 25 --seed 0 --out "$CSV"
 fi
 
 echo "host=$(hostname)  NP(GPUs)=$NP  arch=$ARCH"
