@@ -476,7 +476,7 @@ def build():
         ['Synthetic, GPU batch B','3,000,000','64','128','32 fixed'],
         ['MNIST, Vanda smoke test','70,000','784','10','10 fixed']], [6.7,2.4,2.3,1.6,3.4])
     p(doc,'MNIST combines 70,000 digit images, each flattened into 784 raw pixel features; column 0 is excluded from features and retained as a ground-truth digit label [3]. Synthetic Gaussian blobs contain planted cluster labels, again in column 0. The generator supplies controllable n, d, K, seed, and separation, making it suitable for a fixed-workload scaling experiment.')
-    note(doc,'Workload comparability.','The 100-iteration Atlas workload reports inertia 1.214576×10⁹, whereas Vanda synthetic runs report approximately 8.624057×10⁸. Dataset shape and filename do not establish identical data. Without dataset hashes, timings from these workloads are not pooled into a controlled cross-platform speedup; both remain part of the project results.')
+    note(doc,'Workload comparability.','The 100-iteration Atlas workload reports inertia 1.214576×10⁹, whereas Vanda synthetic runs report approximately 8.624057×10⁸. The Atlas and Vanda datasets downloaded on 12 November are byte-identical by SHA-256; both copies contain three million rows. Historical jobs did not record contemporaneous input hashes. The iteration budgets differ, so these timings are not pooled into a controlled cross-platform speedup.')
     h(doc,'3. Parallel architecture and design decisions')
     h(doc,'3.1 MPI decomposition and global synchronization',2)
     p(doc,'Figure 1 shows the distributed execution path. Rank 0 reads the numeric CSV and seeds centroids. MPI_Scatterv sends near-equal contiguous point blocks to ranks; the first n mod p ranks receive one extra point. MPI_Bcast distributes the common initial centroids. A point belongs to exactly one partition, while all ranks keep the small K×d centroid array.')
@@ -578,7 +578,7 @@ def build():
     p(doc,'The Atlas scaling curves and extended workload show that local assignment work can dominate collective overhead at the tested problem size. The small centroid statistics explain why communication can be amortized over millions of points. Both GPU measurement batches support the same decomposition across two accelerators. These measurements support the design, while a communication-only profile would be needed to attribute exact percentages of runtime to Allreduce, computation, or memory movement.')
     p(doc,'K-means is not embarrassingly parallel as a whole: every centroid update depends on globally reduced statistics and precedes the next assignment. The CUDA implementation keeps that dependency intact while increasing local throughput. The six completed 100-iteration jobs show near-ideal measured scaling over 12–48 ranks, with efficiencies of approximately 98.4–101.6%. These results establish performance over the measured range; additional evidence would be needed to extend the conclusion to larger configurations.')
     h(doc,'8.2 Limits of evidence and interpretation',2)
-    p(doc,'Only strong scaling is measured. Completed CPU experiments cover up to 48 ranks and GPU experiments up to two A40s on one node. Dataset hashes and per-run build manifests are incomplete, so dataset identity across platforms remains unverified. Similar printed inertia is a useful diagnostic rather than a complete proof of identical cluster assignments. Local runs are identified by their execution platform and recorded results rather than PBS job IDs.')
+    p(doc,'Only strong scaling is measured. Completed CPU experiments cover up to 48 ranks and GPU experiments up to two A40s on one node. The retrieved Atlas and Vanda inputs have matching checksums. Historical job-time hashes and complete build manifests were not retained. Similar printed inertia is a useful diagnostic rather than a complete proof of identical cluster assignments. Local runs are identified by their execution platform and recorded results rather than PBS job IDs.')
     p(doc,'The extended Atlas study contains two independent 16-rank jobs and one job at each other rank count; GPU batch B has one timing per configuration. These observations do not provide confidence intervals. The harness selects a minimum when repeated, but raw repetitions are not stored in the CSV. Comparisons are measured examples under shared-cluster conditions. Scheduler allocation counts may exceed active MPI ranks: Vanda assigned 36 CPU slots for one GPU and 72 for two in the session record, while the code launched only one or two ranks.')
     h(doc,'8.3 Conclusion',2)
     p(doc,'The project delivers serial, MPI CPU, and MPI+CUDA implementations of the same Lloyd iteration, with explicit global centroid reductions and completed HPC timing evidence. The Atlas 100-iteration workload covers 12, 16, 24, 32, and 48 ranks across six completed jobs. It reaches 47.28× speedup at 48 ranks, with measured efficiencies spanning approximately 98.4–101.6% across the study. The complementary 32-iteration study reaches 31.32× at 32 ranks across two nodes. Both Vanda measurement batches achieve approximately 2.00× speedup from one to two A40s. MNIST illustrates the limits of raw-pixel clustering, while numerical comparisons support correctness within matched workloads. The principal contribution is the measured relationship between point-level parallel work and the synchronized centroid update, supported by the team’s completed execution records.')
@@ -609,7 +609,7 @@ def build():
         [6.4,4.7,5.3])
     tbl(doc,'A2','Project scheduler ledger: successful runs with retained job identifiers.',
         ['Job identifier','Purpose / outcome','Evidence retained'],[
-        ['1027948.venus01','Atlas MNIST sweep; exit 0; 00:04:33','Completed session record'],
+        ['1027948.venus01','Atlas MNIST sweep; exit 0; 00:04:33','pbs/logs/atlas/1027948.venus01.OU'],
         ['1034257.venus01','Atlas synthetic serial + 16 ranks; 100 iterations; exit 0','pbs/logs/1034257.venus01.OU'],
         ['1036751.venus01','Atlas serial + 32 ranks; 100 iterations; exit 0','pbs/logs/atlas/1036751.venus01.OU'],
         ['1036776.venus01','Atlas serial + 48 ranks; 100 iterations; exit 0','pbs/logs/atlas/1036776.venus01.OU'],
@@ -634,16 +634,16 @@ def build():
         [7.4,9.0])
     p(doc,'A benchmark run uses --label-col 0, the selected seed, --max-iter N, and --fixed-iter. MNIST validation runs may omit --fixed-iter to test convergence and export labels. The commands below illustrate reproduction using the provided source; they are not additional execution claims.')
     h(doc,'B.2 Atlas and Vanda submission examples',2)
-    code(doc,'mkdir -p bin data results pbs/logs\nqsub -l select=1:ncpus=48:mpiprocs=48 \\\n+  -l walltime=02:00:00 \\\n+  -v "CSV=data/blobs_big.csv,K=128,PROCS=48,MAXIT=100,REPS=1" \\\n+  pbs/atlas_sweep.pbs')
+    code(doc,'mkdir -p bin data results pbs/logs\nqsub -l select=1:ncpus=48:mpiprocs=48:mem=40gb \\\n+  -l walltime=02:00:00 \\\n+  -v "CSV=data/blobs_big.csv,K=128,PROCS=48,MAXIT=100,REPS=1" \\\n+  pbs/atlas_sweep.pbs')
     p(doc,'For other completed CPU configurations, replace all three occurrences of 48 above with 12, 16, 24, or 32. Use a separate working directory per job to preserve binaries and result files. On Atlas 9 the working script uses explicit GCC 7.3 and OpenMPI 4.1.1 paths and a clean library path. Compilation uses the compute node’s CPU flags, including -march=native; binaries are rebuilt inside the scheduled job.')
-    code(doc,'module load GCC/13.2.0 OpenMPI/4.1.6-GCC-13.2.0 CUDA/12.4.0\nqsub -l select=1:ncpus=2:ngpus=2:mpiprocs=2 \\\n+  -l walltime=01:00:00 \\\n+  -v "NP=2,CSV=data/blobs_big.csv,K=128,MAXIT=32,SEED=42,CUDA_ARCH=sm_86" \\\n+  pbs/vanda_cuda.pbs')
-    p(doc,'For one GPU set ncpus=1, ngpus=1, mpiprocs=1, and NP=1. Both GPU counts should use the same dataset file and seed. PBS directives must not have trailing inline comments. Submit from the repository root and pre-create pbs/logs and data; compilation and large data generation run inside the allocation.')
+    code(doc,'module load GCC/13.2.0 OpenMPI/4.1.6-GCC-13.2.0 CUDA/12.4.0\nqsub -l select=1:ncpus=72:ngpus=2:mpiprocs=2:mem=480gb \\\n+  -l walltime=01:00:00 \\\n+  -v "NP=2,CSV=data/blobs_big.csv,K=128,MAXIT=32,SEED=42,CUDA_ARCH=sm_86" \\\n+  pbs/vanda_cuda.pbs')
+    p(doc,'For one GPU use ncpus=36, mem=240gb, ngpus=1, mpiprocs=1, and NP=1, matching the recorded Vanda allocation. Both GPU counts should use the same dataset file and seed. PBS directives must not have trailing inline comments. Submit from the repository root and pre-create pbs/logs and data; compilation and large data generation run inside the allocation.')
     h(doc,'B.3 Validation and job inspection',2)
     code(doc,'python3 scripts/compare_labels.py results/serial.labels results/mpi.labels\npython3 scripts/validate.py --pred results/mpi.labels \\\n+  --csv data/mnist.csv --truth-col 0\nqstat -x -f JOB_ID\ngrep "^RESULT" pbs/logs/JOB_ID*.OU')
     p(doc,'A completed benchmark is checked using exit status 0 together with its RESULT or CSV rows, expected n/d/K, rank count, iteration count, and final inertia. Each of the six 100-iteration Atlas jobs contains its serial and MPI rows, and the Vanda logs contain the expected one- and two-GPU results.')
     h(doc,'B.4 Data preservation and report build',2)
     p(doc,'The report builder reads CSV files and logs but does not modify them or submit jobs. Generated charts are stored under report/figures_publication/ as PNG and SVG. report/experiment_manifest.json records artifact hashes and known run IDs. The editable report is report/Parallel_Kmeans_Project_Report.docx, and its rendered counterpart is report/Parallel_Kmeans_Project_Report.pdf. The Markdown source report/report.md also records the project’s extended experiments.')
-    p(doc,'Use distinct dataset hashes and experiment filenames in future runs. Workload and measurement-batch labels support valid comparisons across the completed project archive: the 100-iteration Atlas values must not replace a 32-iteration baseline. Local runs retain their platform and configuration labels, while completed HPC records retain their job identifiers.')
+    p(doc,'To keep the submission small, dataset CSVs are excluded. The README provides MNIST download and checksum-verification commands, plus synthetic-data generation instructions. Public MNIST files match the project inputs; retrieved Atlas and Vanda synthetic copies are byte-identical. Data checksums and HPC source snapshots are retained. Record dataset hashes and distinct experiment filenames in future runs. Workload and measurement-batch labels support valid comparisons across the completed project archive: the 100-iteration Atlas values must not replace a 32-iteration baseline. Local runs retain their platform and configuration labels, while completed HPC records retain their job identifiers.')
     # Explicit table geometry is re-applied after every row exists.
     for t in doc.tables:
         widths=[int(c.get(qn('w:w'))) for c in t._tbl.tblGrid]
@@ -675,8 +675,8 @@ def build():
                 'scaling_24cores_100iter_1037036.csv':'atlas_100_iteration_24_ranks'}
         records.append({'path':'results/'+file,'sha256':before[file],
                         'experiment_group':groups[file], 'rows':read(file)})
-    logs=[r['log'] for r in ATLAS_RUNS]+['pbs/logs/vanda/vanda_1gpu_full.OU','pbs/logs/vanda/vanda_2gpu_full.OU']
-    manifest={'title':'Parallel K-means report evidence','report_date':'2026-11-09',
+    logs=[r['log'] for r in ATLAS_RUNS]+['pbs/logs/atlas/1027948.venus01.OU','pbs/logs/vanda/vanda_1gpu_full.OU','pbs/logs/vanda/vanda_2gpu_full.OU']
+    manifest={'title':'Parallel K-means report evidence','report_date':'2026-11-12',
               'authors':authors,'original_inputs_preserved':True,'completed_runs_only':True,'experiments':records,
               'logs':[{'path':f,'sha256':digest(ROOT/f)} for f in logs],
               'documented_run_ids':['1027948.venus01',*[r['job_id'] for r in ATLAS_RUNS],
@@ -684,7 +684,7 @@ def build():
               'atlas_100_iteration_metrics':atlas_metrics(),
               'local_runs':[{'execution':'Local run — CPU','source':'results/scaling_big.csv'},
                             {'execution':'Local run — CUDA','device':'RTX 3050 Ti','time_s':35.2,'iterations':32}],
-              'interpretation':'One team project; CPU/GPU comparisons require matched workloads; dataset hashes are unavailable.'}
+              'interpretation':'One team project; retrieved Atlas and Vanda synthetic datasets are byte-identical by SHA-256; historical job-time hashes were not recorded; CPU/GPU comparisons require matched iteration budgets.'}
     (OUT/'experiment_manifest.json').write_text(json.dumps(manifest,indent=2)+'\n')
     print(dest)
     print('Original result files unchanged; 6 figures generated; provenance manifest written.')

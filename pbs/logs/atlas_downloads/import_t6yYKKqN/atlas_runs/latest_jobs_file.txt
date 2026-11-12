@@ -1,1 +1,0 @@
-/home/svu/ritiksrivastava/parallelKmean/atlas_runs/run24_K349lhc1/jobs.tsv

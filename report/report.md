@@ -57,7 +57,7 @@ Table 1. Data used for quality analysis and performance experiments.
 
 MNIST combines 70,000 digit images, each flattened into 784 raw pixel features; column 0 is excluded from features and retained as a ground-truth digit label [3]. Synthetic Gaussian blobs contain planted cluster labels, again in column 0. The generator supplies controllable n, d, K, seed, and separation, making it suitable for a fixed-workload scaling experiment.
 
-Workload comparability. The 100-iteration Atlas workload reports inertia 1.214576×10⁹, whereas Vanda synthetic runs report approximately 8.624057×10⁸. Dataset shape and filename do not establish identical data. Without dataset hashes, timings from these workloads are not pooled into a controlled cross-platform speedup; both remain part of the project results.
+Workload comparability. The 100-iteration Atlas workload reports inertia 1.214576×10⁹, whereas Vanda synthetic runs report approximately 8.624057×10⁸. The Atlas and Vanda datasets downloaded on 12 November are byte-identical by SHA-256; both copies contain three million rows. Historical jobs did not record contemporaneous input hashes. The iteration budgets differ, so these timings are not pooled into a controlled cross-platform speedup.
 
 ## 3. Parallel architecture and design decisions
 
@@ -230,7 +230,7 @@ K-means is not embarrassingly parallel as a whole: every centroid update depends
 
 ### 8.2 Limits of evidence and interpretation
 
-Only strong scaling is measured. Completed CPU experiments cover up to 48 ranks and GPU experiments up to two A40s on one node. Dataset hashes and per-run build manifests are incomplete, so dataset identity across platforms remains unverified. Similar printed inertia is a useful diagnostic rather than a complete proof of identical cluster assignments. Local runs are identified by their execution platform and recorded results rather than PBS job IDs.
+Only strong scaling is measured. Completed CPU experiments cover up to 48 ranks and GPU experiments up to two A40s on one node. The retrieved Atlas and Vanda inputs have matching checksums. Historical job-time hashes and complete build manifests were not retained. Similar printed inertia is a useful diagnostic rather than a complete proof of identical cluster assignments. Local runs are identified by their execution platform and recorded results rather than PBS job IDs.
 
 The extended Atlas study contains two independent 16-rank jobs and one job at each other rank count; GPU batch B has one timing per configuration. These observations do not provide confidence intervals. The harness selects a minimum when repeated, but raw repetitions are not stored in the CSV. Comparisons are measured examples under shared-cluster conditions. Scheduler allocation counts may exceed active MPI ranks: Vanda assigned 36 CPU slots for one GPU and 72 for two in the session record, while the code launched only one or two ranks.
 
@@ -277,7 +277,7 @@ Table A2. Project scheduler ledger: successful runs with retained job identifier
 
 | Job identifier | Purpose / outcome | Evidence retained |
 | --- | --- | --- |
-| 1027948.venus01 | Atlas MNIST sweep; exit 0; 00:04:33 | Completed session record |
+| 1027948.venus01 | Atlas MNIST sweep; exit 0; 00:04:33 | pbs/logs/atlas/1027948.venus01.OU |
 | 1034257.venus01 | Atlas synthetic serial + 16 ranks; 100 iterations; exit 0 | pbs/logs/1034257.venus01.OU |
 | 1036751.venus01 | Atlas serial + 32 ranks; 100 iterations; exit 0 | pbs/logs/atlas/1036751.venus01.OU |
 | 1036776.venus01 | Atlas serial + 48 ranks; 100 iterations; exit 0 | pbs/logs/atlas/1036776.venus01.OU |
@@ -311,7 +311,7 @@ A benchmark run uses --label-col 0, the selected seed, --max-iter N, and --fixed
 
 ```bash
 mkdir -p bin data results pbs/logs
-qsub -l select=1:ncpus=48:mpiprocs=48 \
+qsub -l select=1:ncpus=48:mpiprocs=48:mem=40gb \
   -l walltime=02:00:00 \
   -v "CSV=data/blobs_big.csv,K=128,PROCS=48,MAXIT=100,REPS=1" \
   pbs/atlas_sweep.pbs
@@ -321,13 +321,13 @@ For other completed CPU configurations, replace all three occurrences of 48 abov
 
 ```bash
 module load GCC/13.2.0 OpenMPI/4.1.6-GCC-13.2.0 CUDA/12.4.0
-qsub -l select=1:ncpus=2:ngpus=2:mpiprocs=2 \
+qsub -l select=1:ncpus=72:ngpus=2:mpiprocs=2:mem=480gb \
   -l walltime=01:00:00 \
   -v "NP=2,CSV=data/blobs_big.csv,K=128,MAXIT=32,SEED=42,CUDA_ARCH=sm_86" \
   pbs/vanda_cuda.pbs
 ```
 
-For one GPU set ncpus=1, ngpus=1, mpiprocs=1, and NP=1. Both GPU counts should use the same dataset file and seed. PBS directives must not have trailing inline comments. Submit from the repository root and pre-create pbs/logs and data; compilation and large data generation run inside the allocation.
+For one GPU use ncpus=36, mem=240gb, ngpus=1, mpiprocs=1, and NP=1, matching the recorded Vanda allocation. Both GPU counts should use the same dataset file and seed. PBS directives must not have trailing inline comments. Submit from the repository root and pre-create pbs/logs and data; compilation and large data generation run inside the allocation.
 
 ### B.3 Validation and job inspection
 
@@ -345,4 +345,4 @@ A completed benchmark is checked using exit status 0 together with its RESULT or
 
 The report builder reads CSV files and logs but does not modify them or submit jobs. Generated charts are stored under report/figures_publication/ as PNG and SVG. report/experiment_manifest.json records artifact hashes and known run IDs. The editable report is report/Parallel_Kmeans_Project_Report.docx, and its rendered counterpart is report/Parallel_Kmeans_Project_Report.pdf. The Markdown source report/report.md also records the project’s extended experiments.
 
-Use distinct dataset hashes and experiment filenames in future runs. Workload and measurement-batch labels support valid comparisons across the completed project archive: the 100-iteration Atlas values must not replace a 32-iteration baseline. Local runs retain their platform and configuration labels, while completed HPC records retain their job identifiers.
+To keep the submission small, dataset CSVs are excluded. The README provides MNIST download and checksum-verification commands, plus synthetic-data generation instructions. Public MNIST files match the project inputs; retrieved Atlas and Vanda synthetic copies are byte-identical. Data checksums and HPC source snapshots are retained. Record dataset hashes and distinct experiment filenames in future runs. Workload and measurement-batch labels support valid comparisons across the completed project archive: the 100-iteration Atlas values must not replace a 32-iteration baseline. Local runs retain their platform and configuration labels, while completed HPC records retain their job identifiers.

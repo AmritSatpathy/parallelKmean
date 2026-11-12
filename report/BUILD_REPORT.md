@@ -52,13 +52,13 @@ No K-means computation or HPC submission is performed during report generation.
   and lines use per-rank medians where the 16-rank configuration is repeated.
   Both 16-rank timing pairs remain visible in Table 6; no authorship grouping
   or replacement of an earlier completed measurement is used.
-- The completed MNIST jobs are documented as session records in Appendix A.
+- The Atlas MNIST log for 1027948.venus01 is retained in pbs/logs/atlas; the Vanda MNIST test remains documented from the session record.
 - Every 100-iteration CPU speedup uses its own job's serial baseline; all six
   downloaded Atlas logs confirm exit status 0 and matching CSV measurements.
 - Failed and incomplete attempts in the download archive are excluded from
   the report, chart data, and experiment manifest. Nothing submits or reruns them.
-- The 100-iteration Atlas and 32-iteration Vanda workloads have different final inertia;
-  cross-platform timing ratios are not presented as controlled speedups.
+- The 100-iteration Atlas and 32-iteration Vanda workloads use different iteration budgets and report different final inertia;
+  cross-platform timing ratios are not presented as controlled speedups. The Atlas and Vanda datasets downloaded on 12 November have identical SHA-256 checksums; the large CSV is excluded from the code-only submission, with its checksum and generator instructions retained. Public MNIST downloads were also verified byte-identical; README documents downloading them. Job-time checksums were not recorded. Downloaded source and Makefiles match the repository; archived HPC snapshots and the reconciliation manifest are included.
 - NUS policy reference: current version 15 September 2026,
   https://ctlt.nus.edu.sg/wp-content/uploads/2026/04/Policy-for-Use-of-AI-in-Teaching-and-Learning.pdf
 - Citation guidance: https://libguides.nus.edu.sg/citation/ai

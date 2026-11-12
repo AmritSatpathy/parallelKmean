@@ -1,36 +1,46 @@
 #!/usr/bin/env bash
-# Download MNIST in CSV form (label in column 0, 784 pixel features after).
-# Primary source: pjreddie mirror. Falls back to a GitHub mirror if needed.
-#
-# Output:
-#   data/mnist_train.csv  (60000 rows)
-#   data/mnist_test.csv   (10000 rows)
-#   data/mnist.csv        (train+test concatenated, 70000 rows) -- used for runs
-#
+# Fetch the exact MNIST CSV inputs verified against the project on 2026-11-12.
 # Usage: bash scripts/fetch_mnist.sh
+# Optional: DATA_DIR=/absolute/path bash scripts/fetch_mnist.sh
 set -euo pipefail
 cd "$(dirname "$0")/.."
-mkdir -p data
+DATA_DIR="${DATA_DIR:-$PWD/data}"
+mkdir -p "$DATA_DIR"
+command -v python3 >/dev/null
+TEMP_FILE=""
+trap 'if [ -n "$TEMP_FILE" ]; then rm -f "$TEMP_FILE"; fi' EXIT
 
-fetch() {
-    local url="$1" out="$2"
-    if [ -s "$out" ]; then echo "have $out"; return 0; fi
-    echo "downloading $url"
-    if command -v curl >/dev/null; then
-        curl -fL --retry 3 -o "$out" "$url"
-    else
-        wget -q -O "$out" "$url"
-    fi
+check() {
+    python3 scripts/verify_data.py --files "$1" --path "$2"
 }
-
-PRI="https://pjreddie.com/media/files"
-ALT="https://raw.githubusercontent.com/halimb/MNIST-csv/master"
-
-fetch "$PRI/mnist_train.csv" data/mnist_train.csv || \
-    fetch "$ALT/mnist_train.csv" data/mnist_train.csv
-fetch "$PRI/mnist_test.csv" data/mnist_test.csv || \
-    fetch "$ALT/mnist_test.csv" data/mnist_test.csv
-
-cat data/mnist_train.csv data/mnist_test.csv > data/mnist.csv
-echo "rows: $(wc -l < data/mnist.csv) in data/mnist.csv"
-echo "cols: $(head -1 data/mnist.csv | awk -F, '{print NF}')"
+fetch() {
+    local name="$1" out="$DATA_DIR/$1" base
+    if [ -s "$out" ]; then
+        check "$name" "$out"
+        return
+    fi
+    TEMP_FILE=$(mktemp "$DATA_DIR/.${name}.XXXXXX")
+    for base in https://data.pjreddie.com/files https://raw.githubusercontent.com/halimb/MNIST-csv/master; do
+        echo "Downloading $base/$name"
+        if command -v curl >/dev/null; then
+            if ! curl -fL --retry 3 --connect-timeout 20 -o "$TEMP_FILE" "$base/$name"; then continue; fi
+        else
+            if ! wget -O "$TEMP_FILE" "$base/$name"; then continue; fi
+        fi
+        if check "$name" "$TEMP_FILE"; then
+            mv "$TEMP_FILE" "$out"
+            TEMP_FILE=""
+            return
+        fi
+    done
+    echo "Could not obtain the verified $name from either source." >&2
+    return 1
+}
+fetch mnist_train.csv
+fetch mnist_test.csv
+TEMP_FILE=$(mktemp "$DATA_DIR/.mnist.csv.XXXXXX")
+cat "$DATA_DIR/mnist_train.csv" "$DATA_DIR/mnist_test.csv" > "$TEMP_FILE"
+check mnist.csv "$TEMP_FILE"
+mv "$TEMP_FILE" "$DATA_DIR/mnist.csv"
+TEMP_FILE=""
+echo "Ready: $DATA_DIR/mnist.csv (70000 rows; label + 784 features)"

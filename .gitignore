@@ -32,3 +32,6 @@ report/_report_docx.md
 # hand-authored report diagrams are not source and can be regenerated.
 results/*.png
 results/*.svg
+
+# Raw HPC download staging is retained locally; canonical completed logs are tracked.
+pbs/logs/atlas_downloads/

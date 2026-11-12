@@ -41,8 +41,10 @@ best_time=""
 run_best() {  # runs REPS times, echoes the RESULT line with the min time
     local line="" t best_line="" best_t=""
     for _ in $(seq "$REPS"); do
-        line="$("$@" 2>/dev/null | grep '^RESULT' || true)"
-        [ -z "$line" ] && continue
+        if ! line="$("$@" | grep '^RESULT')"; then
+            echo "Benchmark failed or did not emit RESULT: $*" >&2
+            return 1
+        fi
         t="$(echo "$line" | sed -n 's/.*time=\([0-9.]*\).*/\1/p')"
         if [ -z "$best_t" ] || awk -v a="$t" -v b="$best_t" 'BEGIN{exit !(a<b)}'; then
             best_t="$t"; best_line="$line"

@@ -1,6 +1,6 @@
 {
   "title": "Parallel K-means report evidence",
-  "report_date": "2026-11-09",
+  "report_date": "2026-11-12",
   "authors": [
     {
       "name": "AMRIT SATPATHY",
@@ -487,6 +487,10 @@
       "sha256": "9458f8c5551d9354bcd9bcc9fd13e1a787703ee98a18a67818986f9a0c466e48"
     },
     {
+      "path": "pbs/logs/atlas/1027948.venus01.OU",
+      "sha256": "2e939de9b7e14eea22b64e08638e984863bb2b65b6ade38d32cf863d5717e155"
+    },
+    {
       "path": "pbs/logs/vanda/vanda_1gpu_full.OU",
       "sha256": "9448b8610f2a1a2313fc68f5cf5266079801d08bab1fa2d87e1d72217487a9b1"
     },
@@ -611,5 +615,5 @@
       "iterations": 32
     }
   ],
-  "interpretation": "One team project; CPU/GPU comparisons require matched workloads; dataset hashes are unavailable."
+  "interpretation": "One team project; retrieved Atlas and Vanda synthetic datasets are byte-identical by SHA-256; historical job-time hashes were not recorded; CPU/GPU comparisons require matched iteration budgets."
 }

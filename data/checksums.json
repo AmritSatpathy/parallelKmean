@@ -1,0 +1,31 @@
+{
+  "files": [
+    {
+      "file": "blobs_big.csv",
+      "bytes": 1757795622,
+      "sha256": "4c420e3b2e6b442e807a658dd8d0c3d9b1cfb685e51c8868863acc51e8d3de2b"
+    },
+    {
+      "file": "mnist.csv",
+      "bytes": 127865437,
+      "sha256": "511b4397e517355cdeb7d4b78419c0f7bf837f487030b4da731cfcc6bfbec49a"
+    },
+    {
+      "file": "mnist_test.csv",
+      "bytes": 18289443,
+      "sha256": "51c292478d94ec3a01461bdfa82eb0885d262eb09e615679b2d69dedb6ad09e7"
+    },
+    {
+      "file": "mnist_train.csv",
+      "bytes": 109575994,
+      "sha256": "fb60bc58af4dac3554e394af262b3184479833d3cc540ff8783f274b73492d5d"
+    }
+  ],
+  "public_source_verification": {
+    "date": "2026-11-12",
+    "result": "Fresh public train/test CSV downloads are byte-identical to the local project inputs; their concatenation matches mnist.csv.",
+    "train_url": "https://data.pjreddie.com/files/mnist_train.csv",
+    "test_url": "https://data.pjreddie.com/files/mnist_test.csv",
+    "synthetic": "Generated project dataset, no public download URL; both downloaded HPC copies match the recorded checksum."
+  }
+}
