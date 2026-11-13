@@ -591,13 +591,14 @@ def build():
         ('NVIDIA, CUDA C++ Programming Guide, toolkit version 12.4, 2024.','https://docs.nvidia.com/cuda/archive/12.4.0/cuda-c-programming-guide/index.html'),
         ('National University of Singapore, University Policy Workgroup for AI in Teaching and Learning, Policy for the Use of AI in Teaching and Learning, current version 15 September 2026, §§2.5–2.6, 3–4. Accessed 8 November 2026.','https://ctlt.nus.edu.sg/wp-content/uploads/2026/04/Policy-for-Use-of-AI-in-Teaching-and-Learning.pdf'),
         ('NUS Libraries, “Citation Styles: Citing AI Tools,” updated 28 August 2026. Accessed 8 November 2026.','https://libguides.nus.edu.sg/citation/ai'),
-        ('AI acknowledgment. The team used GPT 6.1 Astra, GPT 6.1 Solo, GPT 6 Astra, Claude, ChatGPT/Codex, and Kiro for coding, HPC troubleshooting, analysis, diagrams, and writing. Both authors reviewed the work and retain full responsibility for its accuracy and submission, following NUS guidance [6], [7].',None),
         ('A. Satpathy and R. Srivastava, Parallel K-means project repository: source, experiment CSV files, consolidated HPC logs, and report, 2026. Referenced throughout Appendices A–B.','https://github.com/AmritSatpathy/parallelKmean')]
     for i,(text,url) in enumerate(refs,1):
         par=p(doc,f'[{i}] {text} ','Reference')
         if url:hyperlink(par,'Online source',url)
+    h(doc,'AI acknowledgment')
+    p(doc,'The team used GPT 6.1 Astra, GPT 6.1 Solo, GPT 6 Astra, Claude, ChatGPT/Codex, and Kiro to assist with coding, HPC troubleshooting, result analysis, diagrams, and report writing. Both authors reviewed and verified the submitted code, results, and text. We take full responsibility for the accuracy, originality, and submission of this work in accordance with the NUS Policy for the Use of AI in Teaching and Learning [6] and NUS Libraries citation guidance [7].')
     h(doc,'Appendix A. Experiment provenance and scheduler ledger')
-    p(doc,'This ledger consolidates the team’s completed local and HPC experiments used in the report [9]. Local runs are identified by platform and configuration. Completed HPC jobs retain their documented scheduler identifiers. Artifact checksums in report/experiment_manifest.json identify the retained CSV and log evidence.')
+    p(doc,'This ledger consolidates the team’s completed local and HPC experiments used in the report [8]. Local runs are identified by platform and configuration. Completed HPC jobs retain their documented scheduler identifiers. Artifact checksums in report/experiment_manifest.json identify the retained CSV and log evidence.')
     tbl(doc,'A1','Completed project measurements by execution platform.',
         ['Measurement artifact / record','Coverage','Execution'],[
         ['scaling_big.csv','Serial + MPI ranks 1–16','Local run — CPU'],

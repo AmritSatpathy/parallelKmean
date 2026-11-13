@@ -254,13 +254,15 @@ The project delivers serial, MPI CPU, and MPI+CUDA implementations of the same L
 
 [7] NUS Libraries, “Citation Styles: Citing AI Tools,” updated 28 August 2026. Accessed 8 November 2026. Online source [Online source](https://libguides.nus.edu.sg/citation/ai)
 
-[8] AI acknowledgment. The team used GPT 6.1 Astra, GPT 6.1 Solo, GPT 6 Astra, Claude, ChatGPT/Codex, and Kiro for coding, HPC troubleshooting, analysis, diagrams, and writing. Both authors reviewed the work and retain full responsibility for its accuracy and submission, following NUS guidance [6], [7].
+[8] A. Satpathy and R. Srivastava, Parallel K-means project repository: source, experiment CSV files, consolidated HPC logs, and report, 2026. Referenced throughout Appendices A–B. Online source [Online source](https://github.com/AmritSatpathy/parallelKmean)
 
-[9] A. Satpathy and R. Srivastava, Parallel K-means project repository: source, experiment CSV files, consolidated HPC logs, and report, 2026. Referenced throughout Appendices A–B. Online source [Online source](https://github.com/AmritSatpathy/parallelKmean)
+## AI acknowledgment
+
+The team used GPT 6.1 Astra, GPT 6.1 Solo, GPT 6 Astra, Claude, ChatGPT/Codex, and Kiro to assist with coding, HPC troubleshooting, result analysis, diagrams, and report writing. Both authors reviewed and verified the submitted code, results, and text. We take full responsibility for the accuracy, originality, and submission of this work in accordance with the NUS Policy for the Use of AI in Teaching and Learning [6] and NUS Libraries citation guidance [7].
 
 ## Appendix A. Experiment provenance and scheduler ledger
 
-This ledger consolidates the team’s completed local and HPC experiments used in the report [9]. Local runs are identified by platform and configuration. Completed HPC jobs retain their documented scheduler identifiers. Artifact checksums in report/experiment_manifest.json identify the retained CSV and log evidence.
+This ledger consolidates the team’s completed local and HPC experiments used in the report [8]. Local runs are identified by platform and configuration. Completed HPC jobs retain their documented scheduler identifiers. Artifact checksums in report/experiment_manifest.json identify the retained CSV and log evidence.
 
 Table A1. Completed project measurements by execution platform.
 
